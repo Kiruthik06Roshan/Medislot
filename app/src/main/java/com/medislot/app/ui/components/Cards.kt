@@ -46,32 +46,24 @@ fun MediSlotCard(
 ) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(LocalDimens.current.cornerMedium),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color.Transparent,
+            containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface
         ),
         elevation = CardDefaults.cardElevation(
             defaultElevation = 2.dp,
-            pressedElevation = 6.dp
+            pressedElevation = 4.dp
         ),
-        border = border ?: BorderStroke(1.dp, Color(0xFF334155).copy(alpha = 0.5f)),
+        border = border ?: BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         content = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF1E293B),
-                                Color(0xFF162033)
-                            )
-                        )
-                    )
                     .let {
                         if (onClick != null) it.clickable(onClick = onClick) else it
                     }
-                    .padding(LocalDimens.current.paddingLarge), // 24px padding for breathing room
+                    .padding(LocalDimens.current.paddingLarge),
                 content = content
             )
         }

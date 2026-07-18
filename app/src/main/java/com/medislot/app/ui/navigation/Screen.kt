@@ -28,6 +28,7 @@ sealed class Screen(val route: String) {
     object PatientProfile : Screen("patient_profile")
     object PatientSettings : Screen("patient_settings")
     object PatientNotifications : Screen("patient_notifications")
+    object PatientHospitalMap : Screen("patient_hospital_map")
 
     // Doctor Routes
     object DoctorHome : Screen("doctor_home")

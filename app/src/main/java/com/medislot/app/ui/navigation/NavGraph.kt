@@ -46,6 +46,7 @@ import com.medislot.app.ui.screens.patient.PatientProfileScreen
 import com.medislot.app.ui.screens.patient.QueueWaitingScreen
 import com.medislot.app.ui.screens.patient.SettingsScreen
 import com.medislot.app.ui.screens.patient.SymptomCheckerScreen
+import com.medislot.app.ui.screens.patient.HospitalNavigationScreen
 
 @Composable
 fun MediSlotApp() {
@@ -202,18 +203,29 @@ fun MediSlotApp() {
                     onNavigateToRecords = { navController.navigate(Screen.PatientRecords.route) },
                     onNavigateToEmergency = { navController.navigate(Screen.PatientEmergency.route) },
                     onNavigateToSettings = { navController.navigate(Screen.PatientSettings.route) },
-                    onNavigateToNotifications = { navController.navigate(Screen.PatientNotifications.route) }
+                    onNavigateToNotifications = { navController.navigate(Screen.PatientNotifications.route) },
+                    onNavigateToHospitalMap = { navController.navigate(Screen.PatientHospitalMap.route) },
+                    onNavigateToBooking = { doctorId -> navController.navigate(Screen.PatientAppointmentBooking.createRoute(doctorId)) },
+                    onNavigateToQueue = { apptId -> navController.navigate(Screen.PatientQueueWaiting.createRoute(apptId)) }
                 )
             }
 
             composable(Screen.PatientSymptomChecker.route) {
-                SymptomCheckerScreen(onNavigateBack = { navController.popBackStack() })
+                SymptomCheckerScreen(
+                    onBookClick = { docId ->
+                        navController.navigate(Screen.PatientAppointmentBooking.createRoute(docId))
+                    },
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
 
             composable(Screen.PatientDoctorSearch.route) {
                 DoctorSearchScreen(
                     onDoctorClick = { docId ->
                         navController.navigate(Screen.PatientDoctorDetails.createRoute(docId))
+                    },
+                    onBookClick = { docId ->
+                        navController.navigate(Screen.PatientAppointmentBooking.createRoute(docId))
                     },
                     onNavigateBack = { navController.popBackStack() }
                 )
@@ -254,7 +266,8 @@ fun MediSlotApp() {
                 val appointmentId = backStackEntry.arguments?.getString("appointmentId") ?: ""
                 QueueWaitingScreen(
                     appointmentId = appointmentId,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToHospitalMap = { navController.navigate(Screen.PatientHospitalMap.route) }
                 )
             }
 
@@ -289,6 +302,10 @@ fun MediSlotApp() {
 
             composable(Screen.PatientNotifications.route) {
                 NotificationsScreen(onNavigateBack = { navController.popBackStack() })
+            }
+
+            composable(Screen.PatientHospitalMap.route) {
+                HospitalNavigationScreen(onNavigateBack = { navController.popBackStack() })
             }
 
             // ==========================================

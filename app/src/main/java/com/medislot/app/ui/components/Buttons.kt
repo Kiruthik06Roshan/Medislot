@@ -121,11 +121,11 @@ fun MediSlotSecondaryButton(
         shape = shape,
         colors = ButtonDefaults.outlinedButtonColors(
             contentColor = MaterialTheme.colorScheme.primary,
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            containerColor = MaterialTheme.colorScheme.surface
         ),
         border = BorderStroke(
             width = 1.dp,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+            color = MaterialTheme.colorScheme.primary
         )
     ) {
         Row(
@@ -251,7 +251,7 @@ fun MediSlotOutlinedButton(
         ),
         border = BorderStroke(
             width = 1.dp,
-            color = Color(0xFF334155) // Slate 700 outline
+            color = MaterialTheme.colorScheme.outline
         )
     ) {
         Row(
