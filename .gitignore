@@ -1,0 +1,31 @@
+# Project-wide Git ignore rules
+*.iml
+.gradle/
+build/
+local.properties
+.idea/workspace.xml
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/gradle.xml
+.idea/misc.xml
+.idea/deploymentTargetSelector.xml
+.idea/deploymentTargetDropDown.xml
+.idea/kotlinc.xml
+.idea/vcs.xml
+.idea/inspectionProfiles/
+.idea/iconloader.xml
+captures/
+*.jks
+*.keystore
+.DS_Store
+.externalNativeBuild
+.cxx
+
+# App specific
+/app/build/
+/app/*.iml
+/app/release/
+/app/debug/
