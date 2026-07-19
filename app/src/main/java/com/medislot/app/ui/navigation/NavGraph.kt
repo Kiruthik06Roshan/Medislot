@@ -29,6 +29,8 @@ import com.medislot.app.ui.screens.doctor.DoctorDashboardScreen
 import com.medislot.app.ui.screens.doctor.DoctorPatientDetailsScreen
 import com.medislot.app.ui.screens.doctor.PrescriptionUploadScreen
 import com.medislot.app.ui.screens.doctor.SlotManagementScreen
+import com.medislot.app.ui.screens.doctor.DoctorProfileScreen
+import com.medislot.app.ui.screens.doctor.DoctorHistoryScreen
 import com.medislot.app.ui.screens.hospital.AlertsScreen
 import com.medislot.app.ui.screens.hospital.AnalyticsScreen
 import com.medislot.app.ui.screens.hospital.DoctorManagementScreen
@@ -320,7 +322,8 @@ fun MediSlotApp() {
                         navController.navigate(Screen.Login.route) {
                             popUpTo(0) { inclusive = true }
                         }
-                    }
+                    },
+                    onNavigateToHistory = { navController.navigate("doctor_history") }
                 )
             }
 
@@ -343,6 +346,9 @@ fun MediSlotApp() {
                 val patientId = backStackEntry.arguments?.getString("patientId") ?: ""
                 DoctorPatientDetailsScreen(
                     patientId = patientId,
+                    onNavigateToUploadPrescription = { apptId ->
+                        navController.navigate(Screen.DoctorPrescriptionUpload.createRoute(apptId))
+                    },
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -362,9 +368,12 @@ fun MediSlotApp() {
                 SlotManagementScreen(onNavigateBack = { navController.popBackStack() })
             }
 
+            composable("doctor_history") {
+                DoctorHistoryScreen(onNavigateBack = { navController.popBackStack() })
+            }
+
             composable(Screen.DoctorProfile.route) {
-                PatientProfileScreen(
-                    role = UserRole.DOCTOR,
+                DoctorProfileScreen(
                     onLogout = {
                         activeRole = null
                         navController.navigate(Screen.Login.route) {
