@@ -65,6 +65,13 @@ data class PatientClinicalNotes(
     var referralNotes: String = ""
 )
 
+data class LabOrderItem(
+    val id: String,
+    val testName: String,
+    val priority: String = "Routine", // "Routine", "Urgent", "STAT"
+    val clinicalReason: String = ""
+)
+
 data class PatientRecord(
     val id: String,
     val name: String,
@@ -92,7 +99,7 @@ data class PatientRecord(
     var diagnosis: PatientDiagnosis = PatientDiagnosis(),
     var clinicalNotes: PatientClinicalNotes = PatientClinicalNotes(),
     var prescriptions: List<PrescriptionItem> = emptyList(),
-    var labOrders: List<String> = emptyList(),
+    var labOrders: List<LabOrderItem> = emptyList(),
     var followUpDuration: String = "None",
     var followUpNotes: String = "",
     var actualDurationMinutes: Int = 0
@@ -167,7 +174,7 @@ object DoctorWorkspaceState {
     var currentDiagnosis by mutableStateOf(PatientDiagnosis())
     var currentClinicalNotes by mutableStateOf(PatientClinicalNotes())
     val currentPrescriptions = mutableStateListOf<PrescriptionItem>()
-    val currentLabOrders = mutableStateListOf<String>()
+    val currentLabOrders = mutableStateListOf<LabOrderItem>()
     var currentFollowUpDuration by mutableStateOf("None")
     var currentFollowUpNotes by mutableStateOf("")
     
@@ -201,7 +208,42 @@ object DoctorWorkspaceState {
                 emergencyContact = "John Connor (+1 555-019-2834)",
                 symptoms = "Mild chest discomfort & fatigue during exertion",
                 priority = "High",
-                status = "Checked In"
+                status = "Checked In",
+                vitals = PatientVitals(
+                    bloodPressure = "135/85",
+                    heartRate = 82,
+                    temperature = 98.9f,
+                    oxygenSaturation = 97,
+                    respiratoryRate = 18,
+                    heightCm = 168f,
+                    weightKg = 58f,
+                    bmi = 20.5f,
+                    painScale = 3
+                ),
+                diagnosis = PatientDiagnosis(
+                    chiefComplaint = "Substernal chest pressure radiating to left arm on exertion.",
+                    symptoms = "Mild chest discomfort & fatigue during exertion",
+                    primaryDiagnosis = "Stable Angina Pectoris",
+                    secondaryDiagnosis = "Essential Hypertension",
+                    clinicalImpression = "Suspected Coronary Artery Disease",
+                    doctorNotes = "Symptoms occur with exertion and are relieved by rest. Advise immediate lipid panel check and stress Echo."
+                ),
+                clinicalNotes = PatientClinicalNotes(
+                    observation = "S4 heart sound present on auscultation. Lung fields clear. BP elevated.",
+                    clinicalNotes = "Correlate clinical presentation with upcoming stress test results.",
+                    treatmentPlan = "Prescribe Nitroglycerin sublingual as needed. Initiate Atorvastatin at bedtime.",
+                    recommendations = "Refer to outpatient cardiology for treadmill test.",
+                    lifestyleAdvice = "Low sodium, low fat diet. Moderate exercise as tolerated.",
+                    referralNotes = "Dr. John Doe (Cardiology Wing B)"
+                ),
+                prescriptions = listOf(
+                    PrescriptionItem("med_1", "Nitroglycerin", "0.4 mg", true, false, false, "30 days", "Sublingual, as needed for chest pain"),
+                    PrescriptionItem("med_2", "Atorvastatin", "20 mg", false, false, true, "90 days", "Take at bedtime")
+                ),
+                labOrders = listOf(
+                    LabOrderItem("lab_1", "ECG", "STAT", "Exclusion of acute coronary syndrome"),
+                    LabOrderItem("lab_2", "Lipid Panel", "Urgent", "Monitor LDL/HDL cholesterol")
+                )
             ),
             PatientRecord(
                 id = "pat_2",
@@ -224,7 +266,40 @@ object DoctorWorkspaceState {
                 emergencyContact = "Ford Prefect (+1 555-424-2424)",
                 symptoms = "Chronic mild lower back pain & stress",
                 priority = "Normal",
-                status = "Waiting"
+                status = "Waiting",
+                vitals = PatientVitals(
+                    bloodPressure = "118/76",
+                    heartRate = 68,
+                    temperature = 98.4f,
+                    oxygenSaturation = 99,
+                    respiratoryRate = 14,
+                    heightCm = 180f,
+                    weightKg = 72f,
+                    bmi = 22.2f,
+                    painScale = 4
+                ),
+                diagnosis = PatientDiagnosis(
+                    chiefComplaint = "Chronic mild lower back pain & stress due to posture.",
+                    symptoms = "Lower back stiffness, muscle fatigue.",
+                    primaryDiagnosis = "Lumbar Muscle Strain",
+                    secondaryDiagnosis = "Generalized Anxiety Disorder",
+                    clinicalImpression = "Posture-related musculoskeletal tension",
+                    doctorNotes = "Discomfort is chronic but non-radicular. No signs of disc herniation."
+                ),
+                clinicalNotes = PatientClinicalNotes(
+                    observation = "Mild tenderness on palpation of lumbar paraspinal muscles. Reflexes normal.",
+                    clinicalNotes = "Encourage core muscle strengthening and physical therapy.",
+                    treatmentPlan = "Paracetamol 650mg as needed, heat pack therapy.",
+                    recommendations = "Refer to physiotherapy for postural rehabilitation.",
+                    lifestyleAdvice = "Take active desk breaks every 45 mins. Dynamic stretching.",
+                    referralNotes = "None"
+                ),
+                prescriptions = listOf(
+                    PrescriptionItem("med_3", "Paracetamol", "650 mg", true, false, true, "10 days", "Take after meals for pain relief")
+                ),
+                labOrders = listOf(
+                    LabOrderItem("lab_3", "Spine X-Ray", "Routine", "Exclude mechanical skeletal defects")
+                )
             ),
             PatientRecord(
                 id = "pat_3",
@@ -248,7 +323,42 @@ object DoctorWorkspaceState {
                 emergencyContact = "Corporal Hicks (+1 555-882-2938)",
                 symptoms = "Severe congestion, short of breath, wheezing",
                 priority = "Emergency",
-                status = "Waiting"
+                status = "Waiting",
+                vitals = PatientVitals(
+                    bloodPressure = "128/84",
+                    heartRate = 88,
+                    temperature = 101.2f,
+                    oxygenSaturation = 94,
+                    respiratoryRate = 22,
+                    heightCm = 172f,
+                    weightKg = 63f,
+                    bmi = 21.3f,
+                    painScale = 5
+                ),
+                diagnosis = PatientDiagnosis(
+                    chiefComplaint = "Severe congestion, short of breath & wheezing, productive cough.",
+                    symptoms = "Wheezing, dyspnea, fever, chest congestion.",
+                    primaryDiagnosis = "Acute Bronchitis with Bronchospasm",
+                    secondaryDiagnosis = "Mild Persistent Asthma",
+                    clinicalImpression = "Exacerbated lower respiratory tract infection",
+                    doctorNotes = "Urgent consultation required due to oxygen saturation borderline level."
+                ),
+                clinicalNotes = PatientClinicalNotes(
+                    observation = "Diffused wheezing bilaterally. Accessory muscle use visible. Pyrexia present.",
+                    clinicalNotes = "Nebulize in clinic if distress increases. Pulse-ox monitoring.",
+                    treatmentPlan = "Amoxicillin 500mg, Budesonide Inhaler, Albuterol Nebulizer.",
+                    recommendations = "Monitor oxygen levels. Go to ER if O2 drops below 92%.",
+                    lifestyleAdvice = "Steam inhalation twice daily. Strict avoidance of allergens and dust.",
+                    referralNotes = "Pulmonology Dept (Wing A)"
+                ),
+                prescriptions = listOf(
+                    PrescriptionItem("med_4", "Amoxicillin", "500 mg", true, true, true, "5 days", "Complete full antibiotic course"),
+                    PrescriptionItem("med_5", "Budesonide Inhaler", "200 mcg", true, false, true, "30 days", "Rinse mouth after each use")
+                ),
+                labOrders = listOf(
+                    LabOrderItem("lab_4", "Chest X-Ray", "STAT", "Rule out lobar pneumonia"),
+                    LabOrderItem("lab_5", "CBC", "Urgent", "Assess leucocytosis / infection indicator")
+                )
             ),
             PatientRecord(
                 id = "pat_4",
@@ -271,7 +381,41 @@ object DoctorWorkspaceState {
                 emergencyContact = "Trinity (+1 555-101-0101)",
                 symptoms = "Persistent daily migraines & sleep deprivation",
                 priority = "Normal",
-                status = "Waiting"
+                status = "Waiting",
+                vitals = PatientVitals(
+                    bloodPressure = "122/80",
+                    heartRate = 76,
+                    temperature = 98.6f,
+                    oxygenSaturation = 98,
+                    respiratoryRate = 16,
+                    heightCm = 185f,
+                    weightKg = 78f,
+                    bmi = 22.8f,
+                    painScale = 6
+                ),
+                diagnosis = PatientDiagnosis(
+                    chiefComplaint = "Persistent daily throbbing migraines with photo-sensitivity.",
+                    symptoms = "Severe throbbing headaches, sleep deprivation, eye fatigue.",
+                    primaryDiagnosis = "Chronic Migraine",
+                    secondaryDiagnosis = "Severe Sleep-Onset Insomnia",
+                    clinicalImpression = "Tension migraine secondary to circadian rhythm disruption",
+                    doctorNotes = "Migraines triggered by blue light exposure and lack of restorative sleep."
+                ),
+                clinicalNotes = PatientClinicalNotes(
+                    observation = "Fundoscopy normal. No focal neurological deficits. Neck muscle spasm present.",
+                    clinicalNotes = "Advise screen break intervals. Review sleep diary in 2 weeks.",
+                    treatmentPlan = "Sumatriptan 50mg at onset of aura, Melatonin 5mg at bedtime.",
+                    recommendations = "Refer to neurologist if headache frequency increases.",
+                    lifestyleAdvice = "Limit screens 2 hours before bed. Keep bedroom pitch dark. Hydrate.",
+                    referralNotes = "Neurology Department"
+                ),
+                prescriptions = listOf(
+                    PrescriptionItem("med_6", "Sumatriptan", "50 mg", false, false, false, "10 days", "Take immediately at onset of migraine"),
+                    PrescriptionItem("med_7", "Melatonin", "5 mg", false, false, true, "30 days", "Take 30 mins before sleep")
+                ),
+                labOrders = listOf(
+                    LabOrderItem("lab_6", "Brain MRI Screen", "Routine", "Exclusion of vascular anomaly or lesions")
+                )
             ),
             PatientRecord(
                 id = "pat_5",
@@ -294,7 +438,40 @@ object DoctorWorkspaceState {
                 emergencyContact = "Alfred Pennyworth (+1 555-193-9111)",
                 symptoms = "Multiple physical contusions, shoulder stiffness",
                 priority = "High",
-                status = "Waiting"
+                status = "Waiting",
+                vitals = PatientVitals(
+                    bloodPressure = "115/75",
+                    heartRate = 64,
+                    temperature = 98.2f,
+                    oxygenSaturation = 99,
+                    respiratoryRate = 12,
+                    heightCm = 188f,
+                    weightKg = 95f,
+                    bmi = 26.9f,
+                    painScale = 7
+                ),
+                diagnosis = PatientDiagnosis(
+                    chiefComplaint = "Multiple physical contusions, right shoulder stiffness & pain.",
+                    symptoms = "Bruising, restricted joint motion, localized swelling.",
+                    primaryDiagnosis = "Right Shoulder Contusion & Sprain",
+                    secondaryDiagnosis = "History of Multiple Traumatic Skeletal Injuries",
+                    clinicalImpression = "Soft tissue trauma with minor mechanical impingement",
+                    doctorNotes = "Significant bruising over anterior deltoid. Assess for rotator cuff tear."
+                ),
+                clinicalNotes = PatientClinicalNotes(
+                    observation = "Severe tenderness over greater tuberosity. Restricted passive abduction.",
+                    clinicalNotes = "Keep shoulder immobilized in sling if pain is severe during transport.",
+                    treatmentPlan = "Ibuprofen 400mg twice daily, physical rehabilitation.",
+                    recommendations = "Order shoulder MRI to rule out tendon ruptures.",
+                    lifestyleAdvice = "Strict rest of right arm. Avoid heavy lifting or combat sports.",
+                    referralNotes = "Orthopedic Sciences Dept (Wing C)"
+                ),
+                prescriptions = listOf(
+                    PrescriptionItem("med_8", "Ibuprofen", "400 mg", true, false, true, "10 days", "Take with meals to prevent gastric upset")
+                ),
+                labOrders = listOf(
+                    LabOrderItem("lab_7", "MRI Shoulder", "Urgent", "Assess rotator cuff and labral integrity")
+                )
             )
         ))
         

@@ -40,6 +40,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Call
@@ -60,6 +61,7 @@ import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.QrCode
@@ -86,6 +88,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -124,6 +131,9 @@ import com.medislot.app.ui.components.StatusChip
 import com.medislot.app.ui.components.UserRole
 import com.medislot.app.ui.theme.SOSGradient
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.collectAsState
+import com.medislot.app.viewmodel.AiState
+import com.medislot.app.ui.ai.components.*
 
 @Composable
 fun StatusBadge(status: String) {
@@ -148,32 +158,19 @@ fun StatGridBox(label: String, value: String, modifier: Modifier = Modifier) {
 @Composable
 fun SymptomCheckerScreen(
     onBookClick: (String) -> Unit,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val selectedSymptoms = remember { mutableStateListOf<String>() }
     
-    // UI states
-    var checkingInProgress by remember { mutableStateOf(false) }
+    // Live state collection
+    val symptomState by viewModel.symptomCheckState.collectAsState()
+    
     var isShimmerLoading by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
     var pullDistance by remember { mutableStateOf(0f) }
     val scrollState = rememberScrollState()
-
-    // Non-diagnostic result structures
-    var suggestedDept by remember { mutableStateOf("") }
-    var suggestedSpecialists by remember { mutableStateOf<List<String>>(emptyList()) }
-    var urgencyLevel by remember { mutableStateOf("") } 
-    var actionRecommendation by remember { mutableStateOf("") }
-    var showResults by remember { mutableStateOf(false) }
-    
-    // Expanded AI result attributes
-    var confidencePct by remember { mutableStateOf(0) }
-    var riskRating by remember { mutableStateOf("") }
-    var recommendedWaitingTime by remember { mutableStateOf("") }
-    var nearestSpecialistName by remember { mutableStateOf("") }
-    var hospitalOccupancyRate by remember { mutableStateOf(0) }
-    var estimatedConsultationTime by remember { mutableStateOf(0) }
 
     LaunchedEffect(isRefreshing) {
         if (isRefreshing) {
@@ -233,7 +230,7 @@ fun SymptomCheckerScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Select matching symptoms below or search to trigger an offline AI matched assessment.",
+                        text = "Select matching symptoms below or search to run an enterprise AI matched symptom guide assessment.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -274,12 +271,7 @@ fun SymptomCheckerScreen(
                                     }
                                     .padding(horizontal = 16.dp, vertical = 8.dp)
                             ) {
-                                Text(
-                                    text = symptom,
-                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                UIStateChips(text = symptom, isSelected = isSelected)
                             }
                         }
                     }
@@ -331,226 +323,117 @@ fun SymptomCheckerScreen(
                         text = "Analyze Symptoms Safely",
                         onClick = {
                             if (selectedSymptoms.isEmpty()) return@MediSlotButton
-                            checkingInProgress = true
+                            viewModel.checkSymptoms(selectedSymptoms.joinToString(", "))
                         },
-                        enabled = selectedSymptoms.isNotEmpty() && !checkingInProgress,
+                        enabled = selectedSymptoms.isNotEmpty() && symptomState !is AiState.Loading,
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    LaunchedEffect(checkingInProgress) {
-                        if (checkingInProgress) {
-                            delay(1200)
-                            checkingInProgress = false
-                            
-                            // Simple safe matching logic mapping to departments
-                            val hasUrgent = selectedSymptoms.any { it.contains("Chest", ignoreCase = true) || it.contains("Breath", ignoreCase = true) }
-                            val hasNeuro = selectedSymptoms.any { it.contains("Headache", ignoreCase = true) || it.contains("Dizzy", ignoreCase = true) || it.contains("Fatigue", ignoreCase = true) }
-                            val hasOrtho = selectedSymptoms.any { it.contains("Joint", ignoreCase = true) || it.contains("Stiffness", ignoreCase = true) }
-                            val hasPediatrics = selectedSymptoms.any { it.contains("Fever", ignoreCase = true) || it.contains("Cough", ignoreCase = true) }
+                    Spacer(modifier = Modifier.height(24.dp))
 
-                            confidencePct = (85..98).random()
-                            hospitalOccupancyRate = (40..85).random()
-                            estimatedConsultationTime = (10..45).random()
-
-                            when {
-                                hasUrgent -> {
-                                    suggestedDept = "Cardiology"
-                                    suggestedSpecialists = listOf("Cardiologist", "Pulmonologist", "General Physician")
-                                    urgencyLevel = "High"
-                                    riskRating = "High Risk"
-                                    recommendedWaitingTime = "Immediate (< 2 hrs)"
-                                    nearestSpecialistName = "Dr. John Doe (1.5 km)"
-                                    actionRecommendation = "Based on symptoms of chest discomfort or breathing difficulties, we recommend booking a priority review with a Cardiologist today. If experiencing acute distress, trigger an Emergency SOS immediately."
-                                }
-                                hasNeuro -> {
-                                    suggestedDept = "Neurology"
-                                    suggestedSpecialists = listOf("Neurologist", "Neuro-Physiotherapist", "Internal Medicine Specialist")
-                                    urgencyLevel = "Moderate"
-                                    riskRating = "Medium Risk"
-                                    recommendedWaitingTime = "Within 24 Hours"
-                                    nearestSpecialistName = "Dr. Helen Cho (3.2 km)"
-                                    actionRecommendation = "Symptoms point toward neurological guidance. Please schedule a standard consultation with a Neurologist within 24-48 hours."
-                                }
-                                hasOrtho -> {
-                                    suggestedDept = "Orthopedics"
-                                    suggestedSpecialists = listOf("Orthopedic Surgeon", "Sports Therapist", "Rheumatologist")
-                                    urgencyLevel = "Low"
-                                    riskRating = "Low Risk"
-                                    recommendedWaitingTime = "Within 72 Hours"
-                                    nearestSpecialistName = "Dr. Marcus Vance (2.1 km)"
-                                    actionRecommendation = "Stiffness and joint symptoms indicate skeletal/muscle framework evaluation. Schedule a consultation with an Orthopedics specialist."
-                                }
-                                hasPediatrics -> {
-                                    suggestedDept = "Pediatrics"
-                                    suggestedSpecialists = listOf("Pediatrician", "General Physician", "Immunologist")
-                                    urgencyLevel = "Moderate"
-                                    riskRating = "Medium Risk"
-                                    recommendedWaitingTime = "Within 12 Hours"
-                                    nearestSpecialistName = "Dr. Sarah Jenkins (4.5 km)"
-                                    actionRecommendation = "General medicine or childhood immunization symptoms indicated. Please schedule a review with a Pediatrician or General Physician."
-                                }
-                                else -> {
-                                    suggestedDept = "General Medicine"
-                                    suggestedSpecialists = listOf("General Physician", "Family Medicine Specialist")
-                                    urgencyLevel = "Low"
-                                    riskRating = "Low Risk"
-                                    recommendedWaitingTime = "Self-care & monitor"
-                                    nearestSpecialistName = "Clinic Room 104"
-                                    actionRecommendation = "Standard viral symptoms or general complaints. Book a general medicine checkup or consult a physician online."
-                                }
-                            }
-                            showResults = true
+                    // AI Outputs section
+                    when (val state = symptomState) {
+                        is AiState.Loading -> {
+                            AiLoadingCard(loadingText = "Analyzing symptom mapping securely...")
+                            Spacer(modifier = Modifier.height(20.dp))
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // AI Loading Spinner
-                    if (checkingInProgress) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(120.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                androidx.compose.material3.CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = "Analyzing symptom mapping securely...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        is AiState.Failure -> {
+                            AiErrorCard(
+                                errorText = state.error,
+                                onRetry = { viewModel.checkSymptoms(selectedSymptoms.joinToString(", ")) }
+                            )
+                            Spacer(modifier = Modifier.height(20.dp))
                         }
-                    }
+                        is AiState.Success -> {
+                            val response = state.data
+                            val rawTextRepresentation = """
+                                Conditions: ${response.possibleConditions.joinToString(", ")}
+                                Severity: ${response.severity}
+                                Action: ${response.recommendedAction}
+                                Home Care: ${response.homeCare}
+                            """.trimIndent()
 
-                    // Results Card
-                    AnimatedVisibility(visible = showResults && !checkingInProgress) {
-                        Column {
-                            MediSlotCard(modifier = Modifier.fillMaxWidth()) {
-                                Column {
+                            AiResponseCard(
+                                title = "Symptom Assessment Result",
+                                rawText = rawTextRepresentation,
+                                onRegenerate = { viewModel.checkSymptoms(selectedSymptoms.joinToString(", "), forceRefresh = true) },
+                                isFallback = state.isFallback,
+                                fallbackTimestamp = state.timestamp,
+                                isMock = state.isMock
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text(
+                                        text = "POSSIBLE CONDITIONS",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = response.possibleConditions.joinToString(", ").ifEmpty { "None identified" },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+
                                     Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Severity Rating: ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            text = response.severity,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = when (response.severity.trim().lowercase()) {
+                                                "high", "critical" -> Color(0xFFEF4444)
+                                                "moderate", "medium" -> Color(0xFFF59E0B)
+                                                else -> Color(0xFF22C55E)
+                                            }
+                                        )
+                                    }
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+
+                                    Text("RECOMMENDED ACTION", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                                    Text(text = response.recommendedAction, style = MaterialTheme.typography.bodyMedium)
+
+                                    Text("HOME CARE GUIDELINE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                                    Text(text = response.homeCare, style = MaterialTheme.typography.bodyMedium)
+
+                                    if (response.emergencyWarning.isNotEmpty()) {
                                         Box(
                                             modifier = Modifier
-                                                .size(36.dp)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    when (urgencyLevel) {
-                                                        "High" -> Color(0xFFEF4444).copy(alpha = 0.15f)
-                                                        "Moderate" -> Color(0xFFF59E0B).copy(alpha = 0.15f)
-                                                        else -> Color(0xFF22C55E).copy(alpha = 0.15f)
-                                                    }
-                                                ),
-                                            contentAlignment = Alignment.Center
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFFEF4444).copy(alpha = 0.12f))
+                                                .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                                .padding(10.dp)
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Info,
-                                                contentDescription = null,
-                                                tint = when (urgencyLevel) {
-                                                    "High" -> Color(0xFFEF4444)
-                                                    "Moderate" -> Color(0xFFF59E0B)
-                                                    else -> Color(0xFF22C55E)
-                                                },
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column {
-                                            Text(
-                                                text = "AI System Recommendations",
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(text = "Urgency Level: ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                Text(
-                                                    text = urgencyLevel,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = when (urgencyLevel) {
-                                                        "High" -> Color(0xFFEF4444)
-                                                        "Moderate" -> Color(0xFFF59E0B)
-                                                        else -> Color(0xFF22C55E)
-                                                    }
-                                                )
+                                            Row(verticalAlignment = Alignment.Top) {
+                                                Icon(Icons.Default.Warning, null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column {
+                                                    Text("EMERGENCY WARNING", color = Color(0xFFEF4444), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                    Text(response.emergencyWarning, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodySmall)
+                                                }
                                             }
                                         }
                                     }
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    
-                                    Text(text = "RECOMMENDED DEPARTMENT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                    Text(text = suggestedDept, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                    
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text(text = "SUGGESTED SPECIALISTS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(text = suggestedSpecialists.joinToString(", "), style = MaterialTheme.typography.bodyMedium)
-
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                    // Modern AI Stats Chips (Requirement 9)
-                                    Text(text = "AI METRICS & STATISTICS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    FlowRow(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        // Confidence Chip
-                                        Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)).padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                            Text("Confidence: $confidencePct%", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                        }
-                                        // Risk Level Chip
-                                        Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (urgencyLevel == "High") Color(0xFFEF4444).copy(alpha = 0.12f) else Color(0xFFF59E0B).copy(alpha = 0.12f)).padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                            Text(riskRating, color = if (urgencyLevel == "High") Color(0xFFEF4444) else Color(0xFFF59E0B), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                        }
-                                        // Recommended Wait time chip
-                                        Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                            Text("Wait time: $recommendedWaitingTime", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        // Nearest Specialist chip
-                                        Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                            Text("Nearest: $nearestSpecialistName", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        // Occupancy Chip
-                                        Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                            Text("Occupancy: $hospitalOccupancyRate%", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        // Est consult time chip
-                                        Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                            Text("Consult duration: $estimatedConsultationTime mins", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                    Text(text = "ACTION GUIDELINE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(
-                                        text = actionRecommendation,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(24.dp))
 
-                            // Suggested Doctors List
-                            SectionHeader(title = "Suggested Specialists Available")
-                            Spacer(modifier = Modifier.height(12.dp))
-                            
+                            // Suggested Doctors based on report
+                            val suggestedDeptName = response.possibleConditions.firstOrNull() ?: "General Medicine"
                             val matchingDoctors = MockData.doctors.filter { doc ->
-                                doc.department.equals(suggestedDept, ignoreCase = true) || suggestedDept == "General Medicine"
+                                doc.department.contains(suggestedDeptName, ignoreCase = true) ||
+                                response.doctorVisitRecommendation.contains(doc.department, ignoreCase = true) ||
+                                doc.department.contains("Cardiology")
                             }
 
-                            if (matchingDoctors.isEmpty()) {
-                                Text(text = "No direct specialists found, please schedule a general medicine consultation.")
-                            } else {
+                            if (matchingDoctors.isNotEmpty()) {
+                                SectionHeader(title = "Suggested Available Specialists")
+                                Spacer(modifier = Modifier.height(12.dp))
                                 matchingDoctors.forEach { doc ->
                                     MediSlotCard(
-                                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).clickScale { }
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                                     ) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -569,7 +452,6 @@ fun SymptomCheckerScreen(
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(text = doc.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                                 Text(text = "${doc.department} • ${doc.hospital}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                Text(text = "Fees: ${doc.fees} | Availability: Today", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                                             }
                                             MediSlotSecondaryButton(
                                                 text = "Book",
@@ -580,8 +462,9 @@ fun SymptomCheckerScreen(
                                     }
                                 }
                             }
-
-                            Spacer(modifier = Modifier.height(20.dp))
+                        }
+                        else -> {
+                            // Idle/No query run yet
                         }
                     }
 
@@ -650,6 +533,17 @@ fun SymptomCheckerScreen(
         }
     }
 }
+
+@Composable
+private fun UIStateChips(text: String, isSelected: Boolean) {
+    Text(
+        text = text,
+        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold
+    )
+}
+
 
 // ==========================================================
 // Doctor Search Screen (Redesigned - Multi-Filter & Sort)
@@ -2206,17 +2100,25 @@ fun AppointmentHistoryScreen(onNavigateBack: () -> Unit) {
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
 
-                TabRow(
+                ScrollableTabRow(
                     selectedTabIndex = selectedTab,
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.primary,
+                    edgePadding = 16.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     tabs.forEachIndexed { index, title ->
+                        val icon = when (title.lowercase()) {
+                            "upcoming" -> Icons.Default.Schedule
+                            "completed" -> Icons.Default.CheckCircle
+                            "cancelled" -> Icons.Default.Cancel
+                            else -> Icons.Default.Info
+                        }
                         Tab(
                             selected = selectedTab == index,
                             onClick = { selectedTab = index },
-                            text = { Text(title, fontWeight = FontWeight.Bold) }
+                            icon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            text = { Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium) }
                         )
                     }
                 }
@@ -2414,7 +2316,10 @@ fun AppointmentHistoryScreen(onNavigateBack: () -> Unit) {
 // Medical Records / Reports Screen (Download buttons upgrade)
 // ==========================================================
 @Composable
-fun MedicalRecordsScreen(onNavigateBack: () -> Unit) {
+fun MedicalRecordsScreen(
+    onNavigateBack: () -> Unit,
+    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(0) }
     
@@ -2423,6 +2328,13 @@ fun MedicalRecordsScreen(onNavigateBack: () -> Unit) {
     var isRefreshing by remember { mutableStateOf(false) }
     var pullDistance by remember { mutableStateOf(0f) }
     val scrollState = rememberScrollState()
+
+    // Dialog trigger states
+    var activeReportForAi by remember { mutableStateOf<com.medislot.app.data.model.LabReport?>(null) }
+    var activeMedicationForAi by remember { mutableStateOf<String?>(null) }
+
+    val reportState by viewModel.reportExplanationState.collectAsState()
+    val prescriptionState by viewModel.prescriptionExplanationState.collectAsState()
 
     LaunchedEffect(isRefreshing) {
         if (isRefreshing) {
@@ -2465,17 +2377,20 @@ fun MedicalRecordsScreen(onNavigateBack: () -> Unit) {
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
 
-                TabRow(
+                ScrollableTabRow(
                     selectedTabIndex = selectedTab,
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.primary,
+                    edgePadding = 16.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     listOf("Lab Test Reports", "Active Prescriptions").forEachIndexed { index, title ->
+                        val icon = if (index == 0) Icons.Default.Science else Icons.Default.Medication
                         Tab(
                             selected = selectedTab == index,
                             onClick = { selectedTab = index },
-                            text = { Text(title, fontWeight = FontWeight.Bold) }
+                            icon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            text = { Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium) }
                         )
                     }
                 }
@@ -2508,28 +2423,55 @@ fun MedicalRecordsScreen(onNavigateBack: () -> Unit) {
                                         StatusChip(status = report.status)
                                         Spacer(modifier = Modifier.height(8.dp))
                                         
-                                        // Redesigned Outlined Download Button (Requirement 7)
-                                        OutlinedButton(
-                                            onClick = {
-                                                Toast.makeText(context, "Downloading PDF for ${report.testName}...", Toast.LENGTH_SHORT).show()
-                                            },
-                                            modifier = Modifier.height(34.dp),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Upload,
-                                                contentDescription = "Download",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "Download",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            // AI Explain button
+                                            OutlinedButton(
+                                                onClick = {
+                                                    activeReportForAi = report
+                                                    viewModel.explainReport(report.testName + " with result: " + report.result)
+                                                },
+                                                modifier = Modifier.height(34.dp),
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Info,
+                                                    contentDescription = "AI Explain",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "AI Explain",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+
+                                            // Redesigned Outlined Download Button (Requirement 7)
+                                            OutlinedButton(
+                                                onClick = {
+                                                    Toast.makeText(context, "Downloading PDF for ${report.testName}...", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.height(34.dp),
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Upload,
+                                                    contentDescription = "Download",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Download",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -2566,18 +2508,35 @@ fun MedicalRecordsScreen(onNavigateBack: () -> Unit) {
                                         }
                                     }
                                     
-                                    // Download Outlined Button
-                                    OutlinedButton(
-                                        onClick = {
-                                            Toast.makeText(context, "Downloading prescription receipt PDF...", Toast.LENGTH_SHORT).show()
-                                        },
-                                        modifier = Modifier.height(34.dp),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
-                                        contentPadding = PaddingValues(horizontal = 8.dp)
-                                    ) {
-                                        Icon(Icons.Default.Upload, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("PDF", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        // AI Explain button
+                                        OutlinedButton(
+                                            onClick = {
+                                                activeMedicationForAi = med
+                                                viewModel.explainPrescription(med)
+                                            },
+                                            modifier = Modifier.height(34.dp),
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
+                                            contentPadding = PaddingValues(horizontal = 8.dp)
+                                        ) {
+                                            Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("AI Explain", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                                        }
+
+                                        // Download Outlined Button
+                                        OutlinedButton(
+                                            onClick = {
+                                                Toast.makeText(context, "Downloading prescription receipt PDF...", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.height(34.dp),
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
+                                            contentPadding = PaddingValues(horizontal = 8.dp)
+                                        ) {
+                                            Icon(Icons.Default.Upload, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("PDF", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                                        }
                                     }
                                 }
                             }
@@ -2610,6 +2569,210 @@ fun MedicalRecordsScreen(onNavigateBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    // AI Explanation Dialogs
+    if (activeReportForAi != null) {
+        AlertDialog(
+            onDismissRequest = { activeReportForAi = null },
+            title = {
+                Text(
+                    text = "AI Lab Report Explanation",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Report: ${activeReportForAi!!.testName}",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "Value: ${activeReportForAi!!.result}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+
+                    when (val state = reportState) {
+                        is AiState.Loading -> {
+                            AiLoadingCard(loadingText = "AI is interpreting laboratory findings...")
+                        }
+                        is AiState.Failure -> {
+                            AiErrorCard(
+                                errorText = state.error,
+                                onRetry = { viewModel.explainReport(activeReportForAi!!.testName + " with result: " + activeReportForAi!!.result) }
+                            )
+                        }
+                        is AiState.Success -> {
+                            val data = state.data
+                            if (state.isFallback) {
+                                val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
+                                        .padding(8.dp)
+                                ) {
+                                    Column {
+                                        Text("Previous AI Recommendation", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        Text("Generated earlier on $formattedTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+                            if (state.isMock) {
+                                Text(
+                                    text = "* Sample Recommendation",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            Text(text = data.summary, style = MaterialTheme.typography.bodyMedium)
+
+                            if (data.normalFindings.isNotEmpty()) {
+                                Text("NORMAL FINDINGS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF22C55E))
+                                data.normalFindings.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                            }
+                            if (data.abnormalFindings.isNotEmpty()) {
+                                Text("ABNORMAL FINDINGS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                                data.abnormalFindings.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = Color(0xFFEF4444)) }
+                            }
+
+                            Text("POSSIBLE INTERPRETATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            Text(text = data.possibleMeaning, style = MaterialTheme.typography.bodyMedium)
+
+                            if (data.questionsToAskDoctor.isNotEmpty()) {
+                                Text("QUESTIONS FOR YOUR DOCTOR", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                data.questionsToAskDoctor.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = data.disclaimer,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 14.sp
+                            )
+                        }
+                        else -> {}
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { activeReportForAi = null }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    if (activeMedicationForAi != null) {
+        AlertDialog(
+            onDismissRequest = { activeMedicationForAi = null },
+            title = {
+                Text(
+                    text = "AI Medication Guide",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Medicine: ${activeMedicationForAi!!}",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+
+                    when (val state = prescriptionState) {
+                        is AiState.Loading -> {
+                            AiLoadingCard(loadingText = "AI is drafting pharmacology guide...")
+                        }
+                        is AiState.Failure -> {
+                            AiErrorCard(
+                                errorText = state.error,
+                                onRetry = { viewModel.explainPrescription(activeMedicationForAi!!) }
+                            )
+                        }
+                        is AiState.Success -> {
+                            val data = state.data
+                            if (state.isFallback) {
+                                val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
+                                        .padding(8.dp)
+                                ) {
+                                    Column {
+                                        Text("Previous AI Recommendation", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        Text("Generated earlier on $formattedTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+                            if (state.isMock) {
+                                Text(
+                                    text = "* Sample Recommendation",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            Text(text = data.summary, style = MaterialTheme.typography.bodyMedium)
+
+                            data.medicines.forEach { medExp ->
+                                Text("Drug: ${medExp.name}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                                Text("Purpose: ${medExp.purpose}", style = MaterialTheme.typography.bodySmall)
+                                Text("Instructions: ${medExp.howToTake}", style = MaterialTheme.typography.bodySmall)
+                                if (medExp.commonSideEffects.isNotEmpty()) {
+                                    Text("Potential Side Effects: ${medExp.commonSideEffects.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+
+                            if (data.generalPrecautions.isNotEmpty()) {
+                                Text("SAFETY PRECAUTIONS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                                data.generalPrecautions.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = Color(0xFFEF4444)) }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = data.disclaimer,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 14.sp
+                            )
+                        }
+                        else -> {}
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { activeMedicationForAi = null }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 
@@ -2930,17 +3093,24 @@ fun PatientProfileScreen(
                     }
 
                     if (role == UserRole.PATIENT) {
-                        TabRow(
+                        ScrollableTabRow(
                             selectedTabIndex = selectedTab,
                             containerColor = Color.Transparent,
                             contentColor = MaterialTheme.colorScheme.primary,
+                            edgePadding = 16.dp,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            listOf("Medical ID", "Insurance", "Emergency").forEachIndexed { idx, title ->
+                            val profileTabs = listOf(
+                                Pair("Medical ID", Icons.Default.Assignment),
+                                Pair("Insurance", Icons.Default.HealthAndSafety),
+                                Pair("Emergency", Icons.Default.Emergency)
+                            )
+                            profileTabs.forEachIndexed { idx, (title, icon) ->
                                 Tab(
                                     selected = selectedTab == idx,
                                     onClick = { selectedTab = idx },
-                                    text = { Text(title, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                                    icon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                    text = { Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium) }
                                 )
                             }
                         }
@@ -3018,7 +3188,10 @@ fun PatientProfileScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.Top
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Row(
+                                                modifier = Modifier.weight(1f),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
                                                 Icon(
                                                     imageVector = Icons.Default.HealthAndSafety,
                                                     contentDescription = null,
@@ -3026,12 +3199,26 @@ fun PatientProfileScreen(
                                                     modifier = Modifier.size(24.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(8.dp))
-                                                Column {
-                                                    Text("METROLIFE INSURE", color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                                    Text("Premium Health Plan", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "METROLIFE INSURE",
+                                                        color = Color.White.copy(alpha = 0.8f),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = "Premium Health Plan",
+                                                        color = Color.White,
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
                                                 }
                                             }
-                                            
+                                            Spacer(modifier = Modifier.width(8.dp))
                                             Column(horizontalAlignment = Alignment.End) {
                                                 Box(
                                                     modifier = Modifier
@@ -3055,15 +3242,29 @@ fun PatientProfileScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.Bottom
                                         ) {
-                                            Column {
-                                                Text(MockData.patientProfile.name.uppercase(), color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = MockData.patientProfile.name.uppercase(),
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                                 Spacer(modifier = Modifier.height(2.dp))
-                                                Text("Worldwide Premium Care", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall)
+                                                Text(
+                                                    text = "Worldwide Premium Care",
+                                                    color = Color.White.copy(alpha = 0.9f),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                             }
+                                            Spacer(modifier = Modifier.width(8.dp))
                                             Column(horizontalAlignment = Alignment.End) {
-                                                Text("Policy: #POL-8902123", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall)
-                                                Text("Member Since: 2020", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall)
-                                                Text("Valid: Exp 12/2028", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                                Text("Policy: #POL-8902123", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text("Member Since: 2020", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text("Valid: Exp 12/2028", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
                                     }
@@ -3102,48 +3303,127 @@ fun PatientProfileScreen(
                         }
                     }
 
-                    // Contact Information
-                    SectionHeader(title = "Contact Details")
-                    MediSlotCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            ProfileInfoRow(
-                                icon = Icons.Default.Email,
-                                label = "Email Address",
-                                value = when (role) {
-                                    UserRole.PATIENT -> MockData.patientProfile.email
-                                    UserRole.DOCTOR -> MockData.doctors[0].email
-                                    UserRole.HOSPITAL -> "admin@cityhospital.org"
-                                }
-                            )
-                            HorizontalDivider(color = Color(0xFF334155).copy(alpha = 0.5f))
-                            ProfileInfoRow(
-                                icon = Icons.Default.Phone,
-                                label = "Contact Number",
-                                value = when (role) {
-                                    UserRole.PATIENT -> MockData.patientProfile.contact
-                                    UserRole.DOCTOR -> MockData.doctors[0].contact
-                                    UserRole.HOSPITAL -> "+1 (555) 902-1823"
-                                }
-                            )
+                    if (role == UserRole.HOSPITAL) {
+                        SectionHeader(title = "Hospital Overview")
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Person,
+                                    label = "Administrator Name",
+                                    value = "Dr. Arthur Pendelton"
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ProfileInfoRow(
+                                    icon = Icons.Default.LocalHospital,
+                                    label = "Hospital Type",
+                                    value = "Multi-Specialty Enterprise Hospital"
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Info,
+                                    label = "License Number",
+                                    value = "HOS-LIC-99824A"
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ProfileInfoRow(
+                                    icon = Icons.Default.CalendarMonth,
+                                    label = "Established Year",
+                                    value = "1994"
+                                )
+                            }
+                        }
+
+                        SectionHeader(title = "Operations & Capacity")
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Bed,
+                                    label = "Hospital Capacity",
+                                    value = "500 Beds (Active)"
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ProfileInfoRow(
+                                    icon = Icons.Default.People,
+                                    label = "Departments Count",
+                                    value = "14 Specialties & Departments"
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Emergency,
+                                    label = "Emergency Contact Desk",
+                                    value = "+1 (555) 911-3000"
+                                )
+                            }
+                        }
+
+                        SectionHeader(title = "Address & Contact")
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.LocationOn,
+                                    label = "Hospital Address",
+                                    value = "100 Medical Plaza, Wing A, Metro City"
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Email,
+                                    label = "Hospital Email",
+                                    value = "admin@cityhospital.org"
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Navigation,
+                                    label = "Official Website",
+                                    value = "www.citygeneralhospital.org"
+                                )
+                            }
                         }
                     }
 
-                    // Profile Actions
-                    MediSlotCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    Toast.makeText(context, "Edit Profile Dialog coming soon", Toast.LENGTH_SHORT).show()
-                                },
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Edit Profile Details", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    if (role != UserRole.HOSPITAL) {
+                        // Contact Information
+                        SectionHeader(title = "Contact Details")
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Email,
+                                    label = "Email Address",
+                                    value = when (role) {
+                                        UserRole.PATIENT -> MockData.patientProfile.email
+                                        UserRole.DOCTOR -> MockData.doctors[0].email
+                                        UserRole.HOSPITAL -> "admin@cityhospital.org"
+                                    }
+                                )
+                                HorizontalDivider(color = Color(0xFF334155).copy(alpha = 0.5f))
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Phone,
+                                    label = "Contact Number",
+                                    value = when (role) {
+                                        UserRole.PATIENT -> MockData.patientProfile.contact
+                                        UserRole.DOCTOR -> MockData.doctors[0].contact
+                                        UserRole.HOSPITAL -> "+1 (555) 902-1823"
+                                    }
+                                )
+                            }
+                        }
+
+                        // Profile Actions
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        Toast.makeText(context, "Edit Profile Dialog coming soon", Toast.LENGTH_SHORT).show()
+                                    },
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text("Edit Profile Details", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                    Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
                                 }
-                                Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
                             }
                         }
                     }

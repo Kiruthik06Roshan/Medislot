@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -61,6 +62,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,8 +95,38 @@ import com.medislot.app.ui.components.QuickActionButton
 import com.medislot.app.ui.components.SectionHeader
 import com.medislot.app.ui.components.StatusChip
 import com.medislot.app.ui.theme.LocalDimens
-import com.medislot.app.ui.theme.SOSGradient
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.collectAsState
+import com.medislot.app.viewmodel.AiState
+import com.medislot.app.ui.ai.components.*
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ContentCopy
+import android.widget.Toast
+import android.content.ClipboardManager
+import android.content.ClipData
+import android.content.Context
+import android.content.Intent
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 
 @Composable
 fun Modifier.clickScale(onClick: () -> Unit): Modifier {
@@ -190,10 +223,11 @@ fun PatientDashboardScreen(
     onNavigateToNotifications: () -> Unit,
     onNavigateToHospitalMap: () -> Unit,
     onNavigateToBooking: (String) -> Unit,
-    onNavigateToQueue: (String) -> Unit
+    onNavigateToQueue: (String) -> Unit,
+    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val unreadNotifsCount = MockData.notifications.count { !it.isRead }
-    val activeAppointment = MockData.appointments.firstOrNull() // Look at first element to reflect scenario states
+    val activeAppointment = MockData.appointments.firstOrNull() 
 
     // Loading & Refreshing States
     var isScreenLoading by remember { mutableStateOf(true) }
@@ -204,8 +238,28 @@ fun PatientDashboardScreen(
     // Track local taken medicines for prototype responsiveness
     val takenMeds = remember { mutableStateListOf<String>() }
 
-    // Trigger initial load
+    // AI dialog triggers
+    var isChatOpen by remember { mutableStateOf(false) }
+    var isDietOpen by remember { mutableStateOf(false) }
+    var isPrepOpen by remember { mutableStateOf(false) }
+    var chatMessageText by remember { mutableStateOf("") }
+
+    val chatState by viewModel.chatState.collectAsState()
+    val dietState by viewModel.dietRecommendationState.collectAsState()
+    val prepState by viewModel.appointmentPrepState.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val aiStatus by viewModel.aiStatus.collectAsState()
+
+    LaunchedEffect(viewModel) {
+        viewModel.snackbarMessage.collect {
+            snackbarHostState.showSnackbar(it)
+        }
+    }
+
+    // Trigger initial load and fetch health tips
     LaunchedEffect(Unit) {
+        viewModel.loadDailyHealthTips(29, "Female", "Mild Hypertension", "Healthy nutrition, moderate physical activity")
         delay(800)
         isScreenLoading = false
     }
@@ -214,6 +268,8 @@ fun PatientDashboardScreen(
     LaunchedEffect(isRefreshing) {
         if (isRefreshing) {
             isScreenLoading = true
+            viewModel.clearCache()
+            viewModel.loadDailyHealthTips(29, "Female", "Mild Hypertension", "Healthy nutrition, moderate physical activity")
             delay(1000)
             isScreenLoading = false
             isRefreshing = false
@@ -251,7 +307,20 @@ fun PatientDashboardScreen(
                     }
                 }
             )
-        }
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { isChatOpen = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = Color.White
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SmartToy,
+                    contentDescription = "AI Health Assistant"
+                )
+            }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Box(
             modifier = Modifier
@@ -308,20 +377,24 @@ fun PatientDashboardScreen(
                                 color = MaterialTheme.colorScheme.onBackground
                             )
                         }
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                                .clickable { onNavigateToSettings() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = MockData.patientProfile.name.take(2).uppercase(),
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleLarge
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.medislot.app.ui.ai.components.AiStatusIndicator(status = aiStatus)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                    .clickable { onNavigateToSettings() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = MockData.patientProfile.name.take(2).uppercase(),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                            }
                         }
                     }
 
@@ -471,11 +544,28 @@ fun PatientDashboardScreen(
                                     }
 
                                     Spacer(modifier = Modifier.height(16.dp))
-                                    MediSlotButton(
-                                        text = "Track Live Queue",
-                                        onClick = { onNavigateToQueue(activeAppointment.id) },
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.fillMaxWidth()
-                                    )
+                                    ) {
+                                        MediSlotSecondaryButton(
+                                            text = "AI Prep Checklist",
+                                            onClick = {
+                                                isPrepOpen = true
+                                                viewModel.loadAppointmentPrep(
+                                                    activeAppointment.doctorName,
+                                                    activeAppointment.department,
+                                                    "General checkup, vitals logs, and health tips follow-up"
+                                                )
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        MediSlotButton(
+                                            text = "Track Live Queue",
+                                            onClick = { onNavigateToQueue(activeAppointment.id) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -912,6 +1002,16 @@ fun PatientDashboardScreen(
                         )
                     }
 
+                    Spacer(modifier = Modifier.height(12.dp))
+                    MediSlotSecondaryButton(
+                        text = "Generate AI Diet Plan",
+                        onClick = {
+                            isDietOpen = true
+                            viewModel.loadDietRecommendations("Mild Hypertension", "58 kg", "20.5")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
                     Spacer(modifier = Modifier.height(24.dp))
 
                     // 6. Nearby Hospitals Section
@@ -1047,40 +1147,89 @@ fun PatientDashboardScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     // 8. Daily Health Tips Carousel
-                    SectionHeader(title = "Daily Health Tip")
+                    val tipsState by viewModel.dailyTipsState.collectAsState()
+                    SectionHeader(title = "Daily Health Tip (AI Personalized)")
                     Spacer(modifier = Modifier.height(12.dp))
-                    var currentTipIndex by remember { mutableStateOf(0) }
-                    val tips = MockData.dailyTips
-                    
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            .clickable { currentTipIndex = (currentTipIndex + 1) % tips.size }
-                            .padding(16.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.Top) {
-                            Icon(
-                                imageVector = Icons.Default.LocalHospital,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
+                    when (val state = tipsState) {
+                        is AiState.Loading -> {
+                            Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                                ThinkingAnimation()
+                            }
+                        }
+                        is AiState.Failure -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.loadDailyHealthTips(29, "Female", "Mild Hypertension", "Healthy nutrition, moderate physical activity") }
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Retry loading personalized tips...", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        is AiState.Success -> {
+                            val data = state.data
+                            val tipCategories = listOf(
+                                "Hydration" to data.hydration,
+                                "Exercise" to data.exercise,
+                                "Sleep" to data.sleep,
+                                "Nutrition" to data.nutrition,
+                                "Mental Wellness" to data.mentalWellness
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = tips[currentTipIndex],
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Tip ${currentTipIndex + 1} of ${tips.size} (Tap for next)",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            var activeIndex by remember { mutableStateOf(0) }
+                            val activeTip = tipCategories[activeIndex]
+                            
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                    .clickable { activeIndex = (activeIndex + 1) % tipCategories.size }
+                                    .padding(16.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(
+                                        imageVector = Icons.Default.HealthAndSafety,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = activeTip.first.uppercase(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = activeTip.second,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        if (state.isMock) {
+                                            Text(
+                                                text = "Sample Recommendation",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        }
+                                        Text(
+                                            text = "Tip ${activeIndex + 1} of ${tipCategories.size} (Tap for next category)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        else -> {
+                            Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                                Text("Tip details unavailable.")
                             }
                         }
                     }
@@ -1167,5 +1316,266 @@ fun PatientDashboardScreen(
                 }
             }
         }
+    }
+
+    // AI dialog implementations
+    val context = LocalContext.current
+    if (isChatOpen) {
+        AlertDialog(
+            onDismissRequest = { isChatOpen = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "AI Health Assistant",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Row {
+                        IconButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("MediSlot AI Chat History", viewModel.exportChat())
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Chat history copied to clipboard", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Export Chat", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        IconButton(
+                            onClick = { viewModel.clearChat() }
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Clear Chat", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        IconButton(onClick = { isChatOpen = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
+                        }
+                    }
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxHeight(0.7f).navigationBarsPadding()) {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(viewModel.chatHistory) { msg ->
+                            val alignment = if (msg.isUser) Alignment.End else Alignment.Start
+                            val containerColor = if (msg.isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                            val textColor = if (msg.isUser) Color.White else MaterialTheme.colorScheme.onSurface
+                            
+                            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(containerColor)
+                                        .padding(12.dp)
+                                ) {
+                                    Text(text = msg.text, color = textColor, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                        if (chatState is AiState.Loading) {
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterStart) {
+                                    ThinkingAnimation()
+                                }
+                            }
+                        }
+                        if (chatState is AiState.Success) {
+                            val data = (chatState as AiState.Success<com.medislot.app.data.ai.ChatResponse>).data
+                            if (data.suggestedQuestions.isNotEmpty()) {
+                                item {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        data.suggestedQuestions.forEach { question ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f))
+                                                    .border(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                                    .clickable { viewModel.sendChatMessage(question) }
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(text = question, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth().imePadding(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = chatMessageText,
+                            onValueChange = { chatMessageText = it },
+                            placeholder = { Text("Ask medical/navigation questions...") },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                            onClick = {
+                                if (chatMessageText.isNotBlank()) {
+                                    viewModel.sendChatMessage(chatMessageText)
+                                    chatMessageText = ""
+                                }
+                            },
+                            enabled = chatMessageText.isNotBlank() && chatState !is AiState.Loading
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    if (isDietOpen) {
+        AlertDialog(
+            onDismissRequest = { isDietOpen = false },
+            title = {
+                Text(
+                    text = "Personalized AI Diet Planner",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("Dietary plans customized according to your medical conditions (Mild Hypertension) and body metrics.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+
+                    when (val state = dietState) {
+                        is AiState.Loading -> {
+                            AiLoadingCard(loadingText = "Drafting nutritional recommendations...")
+                        }
+                        is AiState.Failure -> {
+                            AiErrorCard(
+                                errorText = state.error,
+                                onRetry = { viewModel.loadDietRecommendations("Mild Hypertension", "58 kg", "20.5") }
+                            )
+                        }
+                        is AiState.Success -> {
+                            val data = state.data
+                            if (state.isMock) {
+                                Text(
+                                    text = "* Sample Recommendation",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            Text("FOODS TO PREFER", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF22C55E))
+                            data.foodsToEat.forEach { Text("✔ $it", style = MaterialTheme.typography.bodyMedium) }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("FOODS TO AVOID", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                            data.foodsToAvoid.forEach { Text("✖ $it", style = MaterialTheme.typography.bodyMedium) }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("HYDRATION ADVICE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(text = data.hydration, style = MaterialTheme.typography.bodyMedium)
+
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("LIFESTYLE GUIDANCE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            data.lifestyleAdvice.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                        }
+                        else -> {}
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { isDietOpen = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    if (isPrepOpen && activeAppointment != null) {
+        AlertDialog(
+            onDismissRequest = { isPrepOpen = false },
+            title = {
+                Text(
+                    text = "AI Appointment Prep Checklist",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Checklist for appointment with ${activeAppointment.doctorName} (${activeAppointment.department})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+
+                    when (val state = prepState) {
+                        is AiState.Loading -> {
+                            AiLoadingCard(loadingText = "Formulating consult checklist...")
+                        }
+                        is AiState.Failure -> {
+                            AiErrorCard(
+                                errorText = state.error,
+                                onRetry = { viewModel.loadAppointmentPrep(activeAppointment.doctorName, activeAppointment.department, "General fatigue checkup") }
+                            )
+                        }
+                        is AiState.Success -> {
+                            val data = state.data
+                            if (state.isMock) {
+                                Text(
+                                    text = "* Sample Recommendation",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            data.checklist.forEach { item ->
+                                var checked by remember { mutableStateOf(false) }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth().clickable { checked = !checked }.padding(vertical = 4.dp)
+                                ) {
+                                    androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = { checked = it })
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = item, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { isPrepOpen = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }

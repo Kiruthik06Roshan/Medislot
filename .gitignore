@@ -24,6 +24,7 @@ captures/
 .externalNativeBuild
 .cxx
 
+.kotlin/
 # App specific
 /app/build/
 /app/*.iml

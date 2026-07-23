@@ -45,6 +45,9 @@ import com.medislot.app.data.model.LabReport
 import com.medislot.app.ui.components.*
 import com.medislot.app.ui.theme.LocalDimens
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.collectAsState
+import com.medislot.app.viewmodel.AiState
+import com.medislot.app.ui.ai.components.*
 
 // Helper chip styling (responsively sized to prevent clipping)
 @Composable
@@ -1377,11 +1380,33 @@ fun DoctorPatientDetailsScreen(
 @Composable
 fun PrescriptionUploadScreen(
     appointmentId: String,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val patient = DoctorWorkspaceState.appointments.firstOrNull { it.id == appointmentId } 
         ?: DoctorWorkspaceState.appointments.firstOrNull { it.status == "In Consultation" }
         ?: DoctorWorkspaceState.appointments[0]
+
+    // AI dialog triggers and state flows
+    val context = LocalContext.current
+    var activeDocAiFeature by remember { mutableStateOf<String?>(null) }
+    val soapState by viewModel.soapNoteState.collectAsState()
+    val enhanceState by viewModel.clinicalEnhancementState.collectAsState()
+    val diffState by viewModel.diffDiagnosisState.collectAsState()
+    val prescDraftState by viewModel.prescriptionDraftState.collectAsState()
+    val labState by viewModel.labInterpretationState.collectAsState()
+    val eduState by viewModel.patientEducationState.collectAsState()
+    val refState by viewModel.referralLetterState.collectAsState()
+    val dischargeState by viewModel.dischargeSummaryState.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val aiStatus by viewModel.aiStatus.collectAsState()
+
+    LaunchedEffect(viewModel) {
+        viewModel.snackbarMessage.collect {
+            snackbarHostState.showSnackbar(it)
+        }
+    }
         
     // Buffer input states populated from state manager
     var chiefComplaint by remember { mutableStateOf(DoctorWorkspaceState.currentDiagnosis.chiefComplaint) }
@@ -1424,7 +1449,6 @@ fun PrescriptionUploadScreen(
     var nightSelected by remember { mutableStateOf(false) }
     
     var showCompleteDialog by remember { mutableStateOf(false) }
-    val context = LocalContext.current
     
     // Live ticking timer
     val isTimerRunning = DoctorWorkspaceState.isTimerRunning
@@ -1532,7 +1556,8 @@ fun PrescriptionUploadScreen(
     }
 
     Scaffold(
-        topBar = { MediSlotTopBar(title = "Clinical Workspace Desk", onBackClick = onNavigateBack) }
+        topBar = { MediSlotTopBar(title = "Clinical Workspace Desk", onBackClick = onNavigateBack) },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -1563,13 +1588,17 @@ fun PrescriptionUploadScreen(
                         Text("Timer: $timerString", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF0369A1))
                         Text("Avg Duration: ${DoctorWorkspaceState.doctorProfile.averageConsultationTime} mins", style = MaterialTheme.typography.labelSmall, color = Color(0xFF0284C7))
                     }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFFE0F2FE))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text("Consulting Now", color = Color(0xFF0369A1), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        com.medislot.app.ui.ai.components.AiStatusIndicator(status = aiStatus)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFFE0F2FE))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text("Consulting Now", color = Color(0xFF0369A1), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1830,11 +1859,87 @@ fun PrescriptionUploadScreen(
                 }
             }
 
-            // Clinical Notes
             SectionHeader(title = "Clinical Notes & Treatment Plan")
             MediSlotCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(value = observationInput, onValueChange = { observationInput = it }, label = { Text("Clinical Observations") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                    // AI Consultation Copilot Card
+                    MediSlotCard(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.SmartToy, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("AI Consultation Copilot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AssistChip(
+                                    onClick = {
+                                        activeDocAiFeature = "soap"
+                                        viewModel.generateSoapNote("Patient observations: $observationInput. Vitals details: $clinicalNotesInput.")
+                                    },
+                                    label = { Text("Generate SOAP") }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        activeDocAiFeature = "enhance"
+                                        viewModel.enhanceClinicalNotes(clinicalNotesInput)
+                                    },
+                                    label = { Text("Enhance Notes") }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        activeDocAiFeature = "diff"
+                                        viewModel.loadDifferentialDiagnosis(observationInput, "Vitals: $clinicalNotesInput", "No relevant medical history")
+                                    },
+                                    label = { Text("Differential Diagnosis") }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        activeDocAiFeature = "presc_draft"
+                                        viewModel.loadPrescriptionDraft(observationInput, "Vitals: $clinicalNotesInput", "None")
+                                    },
+                                    label = { Text("Draft Prescription") }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        activeDocAiFeature = "lab_interp"
+                                        viewModel.interpretLabReport("CBC / Routine blood check", "Hb 11.2, WBC 12500, Platelets 180k, Creatinine 0.9")
+                                    },
+                                    label = { Text("Explain Lab Report") }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        activeDocAiFeature = "education"
+                                        viewModel.generatePatientEducation("Standard viral infection", "Bed rest, high hydration, paracetamol on fever spike")
+                                    },
+                                    label = { Text("Patient Education") }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        activeDocAiFeature = "referral"
+                                        viewModel.generateReferralLetter(patient.name, patient.age, "Acute Viral Infection", "Severe fatigue and headache. Normal chest auscultation.", "Internal Medicine")
+                                    },
+                                    label = { Text("Referral Letter") }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        activeDocAiFeature = "discharge"
+                                        viewModel.generateDischargeSummary("3 days inpatient stay for acute fever.", "IV fluids, Antibiotics (Ceftriaxone 1g BD)", "Tab Cefixime 200mg BD for 5 days")
+                                    },
+                                    label = { Text("Discharge Summary") }
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(value = observationInput, onValueChange = { observationInput = it }, label = { Text("Clinical Observations (Subjective)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                     OutlinedTextField(value = clinicalNotesInput, onValueChange = { clinicalNotesInput = it }, label = { Text("Internal Clinical Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                     OutlinedTextField(value = treatmentPlanInput, onValueChange = { treatmentPlanInput = it }, label = { Text("Treatment Plan Detail") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = recommendationsInput, onValueChange = { recommendationsInput = it }, label = { Text("Special Recommendations") }, modifier = Modifier.fillMaxWidth())
@@ -1850,7 +1955,7 @@ fun PrescriptionUploadScreen(
                     val labTests = listOf("CBC", "Blood Test", "Urine Test", "ECG", "X-Ray", "MRI", "CT Scan", "Ultrasound", "Liver Function Test", "Kidney Function Test")
                     
                     labTests.forEach { test ->
-                        val isChecked = DoctorWorkspaceState.currentLabOrders.contains(test)
+                        val isChecked = DoctorWorkspaceState.currentLabOrders.any { it.testName == test }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -1859,9 +1964,9 @@ fun PrescriptionUploadScreen(
                                 checked = isChecked,
                                 onCheckedChange = { checkState ->
                                     if (checkState) {
-                                        DoctorWorkspaceState.currentLabOrders.add(test)
+                                        DoctorWorkspaceState.currentLabOrders.add(LabOrderItem(id = java.util.UUID.randomUUID().toString(), testName = test))
                                     } else {
-                                        DoctorWorkspaceState.currentLabOrders.remove(test)
+                                        DoctorWorkspaceState.currentLabOrders.removeAll { it.testName == test }
                                     }
                                 }
                             )
@@ -1924,6 +2029,263 @@ fun PrescriptionUploadScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    // AI Consultation Copilot Overlay Dialogs
+    if (activeDocAiFeature != null) {
+        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        AlertDialog(
+            onDismissRequest = { activeDocAiFeature = null },
+            title = {
+                Text(
+                    text = when (activeDocAiFeature) {
+                        "soap" -> "AI SOAP Note Drafting"
+                        "enhance" -> "AI Documentation Enhancement"
+                        "diff" -> "AI Differential Diagnoses suggestions"
+                        "presc_draft" -> "AI Prescription Draft Assistant"
+                        "lab_interp" -> "AI Laboratory Findings Explanation"
+                        "education" -> "AI Patient Education Summary"
+                        "referral" -> "AI Referral Letter Drafting"
+                        "discharge" -> "AI Discharge Summary Drafting"
+                        else -> "AI Assistant"
+                    },
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val fallbackState = when (activeDocAiFeature) {
+                        "soap" -> soapState
+                        "enhance" -> enhanceState
+                        "diff" -> diffState
+                        "presc_draft" -> prescDraftState
+                        "lab_interp" -> labState
+                        "education" -> eduState
+                        "referral" -> refState
+                        "discharge" -> dischargeState
+                        else -> null
+                    }
+                    if (fallbackState is AiState.Success && fallbackState.isFallback) {
+                        val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(fallbackState.timestamp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
+                                .padding(8.dp)
+                        ) {
+                            Column {
+                                Text("Previous AI Recommendation", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                Text("Generated earlier on $formattedTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    if (fallbackState is AiState.Success && fallbackState.isMock) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Sample Recommendation",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                // We can also use align if we wanted, but Box does it beautifully
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    when (activeDocAiFeature) {
+                        "soap" -> {
+                            when (val state = soapState) {
+                                is AiState.Loading -> AiLoadingCard(loadingText = "Drafting clinical SOAP notes...")
+                                is AiState.Failure -> AiErrorCard(state.error, onRetry = { viewModel.generateSoapNote("Patient observations: $observationInput. Vitals details: $clinicalNotesInput.") })
+                                is AiState.Success -> {
+                                    val data = state.data
+                                    Text("Subjective:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    Text(data.subjective)
+                                    Text("Objective:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    Text(data.objective)
+                                    Text("Assessment:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    Text(data.assessment)
+                                    Text("Plan:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    Text(data.plan)
+                                    
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    MediSlotButton(
+                                        text = "Apply SOAP Note to Fields",
+                                        onClick = {
+                                            observationInput = data.subjective
+                                            clinicalNotesInput = data.objective
+                                            treatmentPlanInput = data.assessment
+                                            recommendationsInput = data.plan
+                                            activeDocAiFeature = null
+                                            Toast.makeText(context, "SOAP notes populated!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                                else -> {}
+                            }
+                        }
+                        "enhance" -> {
+                            when (val state = enhanceState) {
+                                is AiState.Loading -> AiLoadingCard(loadingText = "Enhancing notes structure...")
+                                is AiState.Failure -> AiErrorCard(state.error, onRetry = { viewModel.enhanceClinicalNotes(clinicalNotesInput) })
+                                is AiState.Success -> {
+                                    val data = state.data
+                                    Text(data.enhancedNotes)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    MediSlotButton(
+                                        text = "Apply Enhanced Notes to SOAP",
+                                        onClick = {
+                                            clinicalNotesInput = data.enhancedNotes
+                                            activeDocAiFeature = null
+                                            Toast.makeText(context, "Notes enhanced successfully!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                                else -> {}
+                            }
+                        }
+                        "diff" -> {
+                            when (val state = diffState) {
+                                is AiState.Loading -> AiLoadingCard(loadingText = "Calculating differential diagnoses...")
+                                is AiState.Failure -> AiErrorCard(state.error, onRetry = { viewModel.loadDifferentialDiagnosis(observationInput, "Vitals: $clinicalNotesInput", "") })
+                                is AiState.Success -> {
+                                    val data = state.data
+                                    Text("Possible Diagnoses:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    data.possibleDiagnoses.forEach { Text("• $it") }
+                                    
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Suggested Investigations:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    data.suggestedInvestigations.forEach { Text("• $it") }
+                                    
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Red Flag Warnings:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, color = Color(0xFFEF4444))
+                                    data.redFlags.forEach { Text("• $it", color = Color(0xFFEF4444)) }
+                                    
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(data.disclaimer, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                else -> {}
+                            }
+                        }
+                        "presc_draft" -> {
+                            when (val state = prescDraftState) {
+                                is AiState.Loading -> AiLoadingCard(loadingText = "Formulating prescription categories...")
+                                is AiState.Failure -> AiErrorCard(state.error, onRetry = { viewModel.loadPrescriptionDraft(observationInput, "Vitals: $clinicalNotesInput", "") })
+                                is AiState.Success -> {
+                                    val data = state.data
+                                    Text("Recommended Medicine Categories:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    data.medicineCategories.forEach { Text("• $it") }
+                                    
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Supportive Lifestyle Adjustments:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    data.lifestyleAdvice.forEach { Text("• $it") }
+                                    
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Follow-up Recommendation:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    Text(data.followUpRecommendations)
+                                }
+                                else -> {}
+                            }
+                        }
+                        "lab_interp" -> {
+                            when (val state = labState) {
+                                is AiState.Loading -> AiLoadingCard(loadingText = "Summarizing pathological outputs...")
+                                is AiState.Failure -> AiErrorCard(state.error, onRetry = { viewModel.interpretLabReport("CBC", "Hb 11.2, WBC 12500") })
+                                is AiState.Success -> {
+                                    val data = state.data
+                                    Text(data.summary)
+                                    
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    if (data.abnormalValues.isNotEmpty()) {
+                                        Text("Abnormal Markers:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, color = Color(0xFFEA580C))
+                                        data.abnormalValues.forEach { Text("• $it", color = Color(0xFFEA580C)) }
+                                    }
+                                    if (data.criticalValues.isNotEmpty()) {
+                                        Text("Critical Alerts:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, color = Color(0xFFEF4444))
+                                        data.criticalValues.forEach { Text("• $it", color = Color(0xFFEF4444)) }
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Follow-up Tests to Order:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                    data.possibleFollowUpTests.forEach { Text("• $it") }
+                                }
+                                else -> {}
+                            }
+                        }
+                        "education" -> {
+                            when (val state = eduState) {
+                                is AiState.Loading -> AiLoadingCard(loadingText = "Drafting patient home-care guide...")
+                                is AiState.Failure -> AiErrorCard(state.error, onRetry = { viewModel.generatePatientEducation("Standard viral infection", "Rest & fluid") })
+                                is AiState.Success -> {
+                                    val data = state.data
+                                    Text(data.instructions)
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text("Warning Symptoms to seek care immediately:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, color = Color(0xFFEF4444))
+                                    data.warningSigns.forEach { Text("• $it", color = Color(0xFFEF4444)) }
+                                }
+                                else -> {}
+                            }
+                        }
+                        "referral" -> {
+                            when (val state = refState) {
+                                is AiState.Loading -> AiLoadingCard(loadingText = "Drafting referral documentation...")
+                                is AiState.Failure -> AiErrorCard(state.error, onRetry = { viewModel.generateReferralLetter("John Connor", 35, "Cardiac Murmur", "Echocardiogram suggested.", "Cardiologist") })
+                                is AiState.Success -> {
+                                    val data = state.data
+                                    Text(data.letter)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    MediSlotButton(
+                                        text = "Copy Referral Letter",
+                                        onClick = {
+                                            val clip = android.content.ClipData.newPlainText("EHR Referral Letter", data.letter)
+                                            clipboard.setPrimaryClip(clip)
+                                            Toast.makeText(context, "Referral letter copied!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                                else -> {}
+                            }
+                        }
+                        "discharge" -> {
+                            when (val state = dischargeState) {
+                                is AiState.Loading -> AiLoadingCard(loadingText = "Generating discharge outline...")
+                                is AiState.Failure -> AiErrorCard(state.error, onRetry = { viewModel.generateDischargeSummary("Fever case", "IV Fluids", "Antibiotics") })
+                                is AiState.Success -> {
+                                    val data = state.data
+                                    Text(data.letter)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    MediSlotButton(
+                                        text = "Copy Discharge Summary",
+                                        onClick = {
+                                            val clip = android.content.ClipData.newPlainText("EHR Discharge Summary", data.letter)
+                                            clipboard.setPrimaryClip(clip)
+                                            Toast.makeText(context, "Discharge summary copied!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                                else -> {}
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { activeDocAiFeature = null }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 

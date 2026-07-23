@@ -35,7 +35,10 @@ data class DoctorProfileData(
     val availability: String,
     val slotTimes: List<String>,
     val email: String,
-    val contact: String
+    val contact: String,
+    val status: String = "On Duty", // On Duty, With Patient, In Surgery, Off Duty, On Break
+    val room: String = "Room 2A",
+    val shift: String = "Day Shift (08:00 AM - 04:00 PM)"
 )
 
 data class HospitalResource(
@@ -44,7 +47,20 @@ data class HospitalResource(
     val total: Int,
     val available: Int,
     val unit: String,
-    val category: String // "ICU", "Staff", "Equipment", "Gas"
+    val category: String, // "ICU", "Staff", "Equipment", "Gas"
+    val lastUpdated: String = "Updated 2 mins ago",
+    val trend: String = "+1.5%",
+    val isTrendPositive: Boolean = true
+)
+
+data class OperationalAlert(
+    val id: String,
+    val title: String,
+    val message: String,
+    val severity: String, // Critical, High, Medium, Low
+    val timestamp: String,
+    val department: String,
+    var isResolved: Boolean = false
 )
 
 data class AppointmentData(
@@ -122,7 +138,10 @@ object MockData {
             availability = "Monday - Friday",
             slotTimes = listOf("09:00 AM", "10:30 AM", "11:00 AM", "02:30 PM", "04:00 PM"),
             email = "j.doe@cityhospital.org",
-            contact = "+1 (555) 123-4567"
+            contact = "+1 (555) 123-4567",
+            status = "In Surgery",
+            room = "Room 4B",
+            shift = "Day Shift (08:00 AM - 04:00 PM)"
         ),
         DoctorProfileData(
             id = "doc_2",
@@ -136,7 +155,10 @@ object MockData {
             availability = "Tuesday & Thursday",
             slotTimes = listOf("09:30 AM", "10:00 AM", "01:30 PM", "03:00 PM"),
             email = "h.cho@metrohealth.org",
-            contact = "+1 (555) 234-5678"
+            contact = "+1 (555) 234-5678",
+            status = "With Patient",
+            room = "Room 2A",
+            shift = "Evening Shift (04:00 PM - 12:00 AM)"
         ),
         DoctorProfileData(
             id = "doc_3",
@@ -150,7 +172,10 @@ object MockData {
             availability = "Monday, Wednesday, Friday",
             slotTimes = listOf("10:00 AM", "11:30 AM", "03:30 PM", "04:30 PM"),
             email = "m.vance@cityhospital.org",
-            contact = "+1 (555) 345-6789"
+            contact = "+1 (555) 345-6789",
+            status = "On Duty",
+            room = "Room 105",
+            shift = "Day Shift (08:00 AM - 04:00 PM)"
         ),
         DoctorProfileData(
             id = "doc_4",
@@ -164,17 +189,50 @@ object MockData {
             availability = "Monday - Thursday",
             slotTimes = listOf("08:30 AM", "09:00 AM", "11:00 AM", "01:00 PM", "02:00 PM"),
             email = "s.jenkins@childrenshealth.org",
-            contact = "+1 (555) 456-7890"
+            contact = "+1 (555) 456-7890",
+            status = "On Break",
+            room = "Room 3C",
+            shift = "Day Shift (08:00 AM - 04:00 PM)"
+        ),
+        DoctorProfileData(
+            id = "doc_5",
+            name = "Dr. Robert Carter",
+            department = "Cardiology",
+            hospital = "City General Hospital",
+            rating = 4.6f,
+            experience = "8 years",
+            fees = "$95",
+            bio = "Dr. Carter is specialized in cardiovascular therapies.",
+            availability = "Monday & Wednesday",
+            slotTimes = listOf("09:00 AM", "11:00 AM"),
+            email = "r.carter@cityhospital.org",
+            contact = "+1 (555) 789-0123",
+            status = "Off Duty",
+            room = "Room 4A",
+            shift = "Night Shift (12:00 AM - 08:00 AM)"
         )
     )
 
     val resources = listOf(
-        HospitalResource("res_1", "ICU Beds", 20, 4, "beds", "ICU"),
-        HospitalResource("res_2", "Emergency Beds", 40, 12, "beds", "ICU"),
-        HospitalResource("res_3", "Oxygen Reserves", 1000, 780, "Liters", "Gas"),
-        HospitalResource("res_4", "Ventilators", 15, 6, "units", "Equipment"),
-        HospitalResource("res_5", "On-Call Nurses", 50, 42, "staff", "Staff"),
-        HospitalResource("res_6", "Duty Doctors", 18, 14, "staff", "Staff")
+        HospitalResource("res_1", "ICU Beds", 20, 4, "beds", "ICU", "Updated 2 mins ago", "-5%", false),
+        HospitalResource("res_2", "Emergency Beds", 40, 12, "beds", "ICU", "Updated 5 mins ago", "+8%", true),
+        HospitalResource("res_3", "Oxygen Reserves", 1000, 780, "Liters", "Gas", "Updated 1 min ago", "-12%", false),
+        HospitalResource("res_4", "Ventilators", 15, 6, "units", "Equipment", "Updated 10 mins ago", "Stable", true),
+        HospitalResource("res_5", "On-Call Nurses", 50, 42, "staff", "Staff", "Updated 15 mins ago", "+4%", true),
+        HospitalResource("res_6", "Duty Doctors", 18, 14, "staff", "Staff", "Updated 12 mins ago", "+2%", true)
+    )
+
+    val operationalAlerts = listOf(
+        OperationalAlert("alert_1", "ICU Occupancy Above Threshold", "ICU occupancy has reached 95% capacity. Immediate discharge or transfer review required.", "Critical", "10 mins ago", "ICU"),
+        OperationalAlert("alert_2", "Oxygen Reserve Below Safe Level", "Main oxygen reservoir level dropped below 20% safe reserve.", "Critical", "25 mins ago", "Facilities"),
+        OperationalAlert("alert_3", "Ventilator Maintenance Required", "Ventilator UNIT-08 has scheduled routine maintenance due today.", "Medium", "1 hr ago", "Biomedical"),
+        OperationalAlert("alert_4", "Emergency Department Overload", "ED waiting room time exceeds 45 minutes due to high trauma inflow.", "High", "2 hrs ago", "Emergency"),
+        OperationalAlert("alert_5", "Blood Bank Inventory Low", "O-Negative blood units are below minimum stock level (2 units remaining).", "High", "4 hrs ago", "Lab & Blood Bank"),
+        OperationalAlert("alert_6", "Ambulance Arrival Notification", "Trauma ambulance AMB-04 arriving in 5 minutes with 3 critical patients.", "High", "5 hrs ago", "Emergency"),
+        OperationalAlert("alert_7", "Staff Shortage Current Shift", "Nurse understaffing reported in Wing B floor 3.", "Medium", "6 hrs ago", "Nursing"),
+        OperationalAlert("alert_8", "Network Server Issue", "Electronic Health Record (EHR) sync latency detected in server node 4.", "Low", "8 hrs ago", "IT Department"),
+        OperationalAlert("alert_9", "Fire Safety Equipment Due", "Routine inspection of pressure valves for fire suppression in Wing A.", "Low", "12 hrs ago", "Safety"),
+        OperationalAlert("alert_10", "Pharmacy Stock Running Low", "Inpatient pharmacy running low on critical antibiotics (Ciprofloxacin).", "Medium", "14 hrs ago", "Pharmacy")
     )
 
     val appointments = mutableListOf(

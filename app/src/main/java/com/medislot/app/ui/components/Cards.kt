@@ -42,6 +42,7 @@ fun MediSlotCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     border: BorderStroke? = null,
+    elevationDp: androidx.compose.ui.unit.Dp = 2.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
@@ -52,10 +53,10 @@ fun MediSlotCard(
             contentColor = MaterialTheme.colorScheme.onSurface
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = 2.dp,
-            pressedElevation = 4.dp
+            defaultElevation = elevationDp,
+            pressedElevation = elevationDp + 2.dp
         ),
-        border = border ?: BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = border ?: BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
         content = {
             Column(
                 modifier = Modifier
@@ -68,6 +69,34 @@ fun MediSlotCard(
             )
         }
     )
+}
+
+@Composable
+fun InfoChip(
+    icon: ImageVector,
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(12.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 enum class StatTrend {
@@ -184,9 +213,10 @@ fun StatusChip(
     modifier: Modifier = Modifier
 ) {
     val (bgColor, txtColor) = when (status.lowercase()) {
-        "scheduled", "active", "online", "normal", "completed" -> Pair(Color(0xFF22C55E).copy(alpha = 0.15f), Color(0xFF22C55E))
-        "pending", "warning", "critical", "occupying" -> Pair(Color(0xFFF59E0B).copy(alpha = 0.15f), Color(0xFFF59E0B))
-        "cancelled", "danger", "sos", "offline" -> Pair(Color(0xFFEF4444).copy(alpha = 0.15f), Color(0xFFEF4444))
+        "scheduled", "active", "online", "normal", "completed", "on duty" -> Pair(Color(0xFF22C55E).copy(alpha = 0.15f), Color(0xFF22C55E))
+        "pending", "warning", "high", "occupying", "on break" -> Pair(Color(0xFFF59E0B).copy(alpha = 0.15f), Color(0xFFF59E0B))
+        "cancelled", "danger", "sos", "offline", "off duty", "critical" -> Pair(Color(0xFFEF4444).copy(alpha = 0.15f), Color(0xFFEF4444))
+        "with patient", "in surgery", "medium", "low" -> Pair(Color(0xFF06B6D4).copy(alpha = 0.15f), Color(0xFF06B6D4))
         else -> Pair(Color(0xFF06B6D4).copy(alpha = 0.15f), Color(0xFF06B6D4))
     }
 
