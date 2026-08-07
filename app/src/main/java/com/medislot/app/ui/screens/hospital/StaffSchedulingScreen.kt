@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
@@ -362,7 +363,14 @@ fun StaffScheduleCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(schedule.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = schedule.name,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
                     Box(
                         modifier = Modifier
@@ -381,10 +389,14 @@ fun StaffScheduleCard(
                             color = when (schedule.role) {
                                 "Doctor" -> Color(0xFF2563EB)
                                 "Nurse" -> Color(0xFF10B981)
+                                "Lab Technician" -> Color(0xFF8B5CF6)
+                                "Pharmacist" -> Color(0xFFEC4899)
                                 else -> Color(0xFF475467)
                             },
                             fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }

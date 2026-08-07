@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
@@ -326,7 +327,10 @@ fun DoctorApplicantCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Box(
                         modifier = Modifier
                             .size(38.dp)
@@ -341,9 +345,21 @@ fun DoctorApplicantCard(
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(application.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
-                        Text(application.specialization, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = application.name,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = application.specialization,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
@@ -361,12 +377,20 @@ fun DoctorApplicantCard(
                     VerificationStatus.WAITING_FOR_DOCUMENTS -> "Waiting for Docs"
                 }
 
+                Spacer(modifier = Modifier.width(12.dp))
                 Box(
                     modifier = Modifier
                         .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(100.dp))
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
-                    Text(statusText, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = statusText,
+                        color = statusColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
 
