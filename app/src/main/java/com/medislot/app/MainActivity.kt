@@ -10,9 +10,10 @@ import com.medislot.app.ui.theme.MediSlotTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.medislot.app.ui.theme.ThemeManager.initialize(applicationContext)
         enableEdgeToEdge()
         setContent {
-            MediSlotTheme {
+            MediSlotTheme(darkTheme = com.medislot.app.ui.theme.ThemeManager.isDarkMode) {
                 MediSlotApp()
             }
         }

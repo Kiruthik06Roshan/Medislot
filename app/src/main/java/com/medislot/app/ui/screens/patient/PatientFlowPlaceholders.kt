@@ -84,6 +84,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -162,15 +166,50 @@ fun SymptomCheckerScreen(
     viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    val selectedSymptoms = remember { mutableStateListOf<String>() }
-    
+    var symptomsText by remember { androidx.compose.runtime.mutableStateOf("") }
+
     // Live state collection
     val symptomState by viewModel.symptomCheckState.collectAsState()
+    val symptomHistory = viewModel.symptomAnalysisHistory
     
     var isShimmerLoading by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
     var pullDistance by remember { mutableStateOf(0f) }
     val scrollState = rememberScrollState()
+
+    val context = LocalContext.current
+    var showSuccessNotificationTrigger by remember { mutableStateOf(false) }
+    var showFailureNotificationTrigger by remember { mutableStateOf(false) }
+
+    val runAnalysis: (String, Boolean) -> Unit = { symptoms, force ->
+        showSuccessNotificationTrigger = true
+        showFailureNotificationTrigger = true
+        viewModel.checkSymptoms(symptoms, forceRefresh = force)
+    }
+
+    LaunchedEffect(symptomState) {
+        when (val state = symptomState) {
+            is AiState.Success -> {
+                if (showSuccessNotificationTrigger) {
+                    showSuccessNotificationTrigger = false
+                    showFailureNotificationTrigger = false
+                    if (state.isMock) {
+                        Toast.makeText(context, "Unable to reach AI service.\n\nShowing clinical reference recommendations.", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "AI response generated successfully.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            is AiState.Failure -> {
+                if (showFailureNotificationTrigger) {
+                    showSuccessNotificationTrigger = false
+                    showFailureNotificationTrigger = false
+                    Toast.makeText(context, "Unable to reach AI service.\n\nShowing clinical reference recommendations.", Toast.LENGTH_LONG).show()
+                }
+            }
+            else -> {}
+        }
+    }
 
     LaunchedEffect(isRefreshing) {
         if (isRefreshing) {
@@ -178,6 +217,18 @@ fun SymptomCheckerScreen(
             delay(800)
             isShimmerLoading = false
             isRefreshing = false
+        }
+    }
+
+    // Helper to toggle chips in symptomsText
+    val toggleSymptomInText: (String) -> Unit = { symptom ->
+        val trimmed = symptom.trim()
+        val regex = Regex("(?i)\\b${Regex.escape(trimmed)}\\b")
+        symptomsText = if (symptomsText.contains(regex)) {
+            val cleaned = symptomsText.replace(regex, "").trim()
+            cleaned.replace(Regex("\\n+"), "\n").trim()
+        } else {
+            if (symptomsText.isEmpty()) trimmed else "$symptomsText\n$trimmed"
         }
     }
 
@@ -230,13 +281,27 @@ fun SymptomCheckerScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Select matching symptoms below or search to run an enterprise AI matched symptom guide assessment.",
+                        text = "Describe your symptoms or search common symptoms below to run an AI assessment guide.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Search input
+                    // Symptoms custom text field input
+                    OutlinedTextField(
+                        value = symptomsText,
+                        onValueChange = { symptomsText = it },
+                        placeholder = { Text("Describe your symptoms in detail (e.g. Headache for two days, stomach hurts after eating)", fontSize = 14.sp) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp),
+                        maxLines = 5,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Search input to filter chips
                     MediSlotSearchBar(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -258,7 +323,7 @@ fun SymptomCheckerScreen(
                         contentPadding = PaddingValues(vertical = 4.dp)
                     ) {
                         items(filteredSymptoms) { symptom ->
-                            val isSelected = selectedSymptoms.contains(symptom)
+                            val isSelected = symptomsText.contains(symptom, ignoreCase = true)
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(20.dp))
@@ -266,8 +331,7 @@ fun SymptomCheckerScreen(
                                         if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
                                     )
                                     .clickable {
-                                        if (isSelected) selectedSymptoms.remove(symptom)
-                                        else selectedSymptoms.add(symptom)
+                                        toggleSymptomInText(symptom)
                                     }
                                     .padding(horizontal = 16.dp, vertical = 8.dp)
                             ) {
@@ -278,74 +342,53 @@ fun SymptomCheckerScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Selected Symptoms Tags
-                    if (selectedSymptoms.isNotEmpty()) {
-                        Text(
-                            text = "Selected Symptoms",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            selectedSymptoms.forEach { symptom ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(symptom, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Remove",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier
-                                                .size(14.dp)
-                                                .clickable { selectedSymptoms.remove(symptom) }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(24.dp))
-                    }
-
                     // Submit Button
+                    val isLoading = symptomState is AiState.Loading
                     MediSlotButton(
-                        text = "Analyze Symptoms Safely",
+                        text = if (isLoading) "Analyzing..." else "Analyze Symptoms",
                         onClick = {
-                            if (selectedSymptoms.isEmpty()) return@MediSlotButton
-                            viewModel.checkSymptoms(selectedSymptoms.joinToString(", "))
+                            if (symptomsText.isBlank()) return@MediSlotButton
+                            runAnalysis(symptomsText, false)
                         },
-                        enabled = selectedSymptoms.isNotEmpty() && symptomState !is AiState.Loading,
+                        enabled = symptomsText.isNotBlank() && !isLoading,
                         modifier = Modifier.fillMaxWidth()
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // AI Outputs section
-                    when (val state = symptomState) {
-                        is AiState.Loading -> {
-                            AiLoadingCard(loadingText = "Analyzing symptom mapping securely...")
-                            Spacer(modifier = Modifier.height(20.dp))
-                        }
-                        is AiState.Failure -> {
-                            AiErrorCard(
-                                errorText = state.error,
-                                onRetry = { viewModel.checkSymptoms(selectedSymptoms.joinToString(", ")) }
+                    // Loader card
+                    if (isLoading) {
+                        AiLoadingCard(loadingText = "Analyzing symptom mapping securely...")
+                        Spacer(modifier = Modifier.height(20.dp))
+                    } else if (symptomState is AiState.Failure) {
+                        AiErrorCard(
+                            errorText = (symptomState as AiState.Failure).error,
+                            onRetry = { runAnalysis(symptomsText, false) }
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
+
+                    // Previous assessments (History)
+                    if (symptomHistory.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Assessment History",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.height(20.dp))
+                            TextButton(onClick = { viewModel.clearSymptomHistory() }) {
+                                Text("Clear History", color = MaterialTheme.colorScheme.error)
+                            }
                         }
-                        is AiState.Success -> {
-                            val response = state.data
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        symptomHistory.forEach { item ->
+                            val response = item.response
                             val rawTextRepresentation = """
                                 Conditions: ${response.possibleConditions.joinToString(", ")}
                                 Severity: ${response.severity}
@@ -356,12 +399,26 @@ fun SymptomCheckerScreen(
                             AiResponseCard(
                                 title = "Symptom Assessment Result",
                                 rawText = rawTextRepresentation,
-                                onRegenerate = { viewModel.checkSymptoms(selectedSymptoms.joinToString(", "), forceRefresh = true) },
-                                isFallback = state.isFallback,
-                                fallbackTimestamp = state.timestamp,
-                                isMock = state.isMock
+                                onRegenerate = { runAnalysis(item.symptoms, true) },
+                                isFallback = false,
+                                fallbackTimestamp = item.timestamp,
+                                isMock = false
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text(
+                                        text = "INPUT SYMPTOMS",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = item.symptoms,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+
                                     Text(
                                         text = "POSSIBLE CONDITIONS",
                                         style = MaterialTheme.typography.labelSmall,
@@ -415,56 +472,79 @@ fun SymptomCheckerScreen(
                                             }
                                         }
                                     }
-                                }
-                            }
 
-                            Spacer(modifier = Modifier.height(24.dp))
-
-                            // Suggested Doctors based on report
-                            val suggestedDeptName = response.possibleConditions.firstOrNull() ?: "General Medicine"
-                            val matchingDoctors = MockData.doctors.filter { doc ->
-                                doc.department.contains(suggestedDeptName, ignoreCase = true) ||
-                                response.doctorVisitRecommendation.contains(doc.department, ignoreCase = true) ||
-                                doc.department.contains("Cardiology")
-                            }
-
-                            if (matchingDoctors.isNotEmpty()) {
-                                SectionHeader(title = "Suggested Available Specialists")
-                                Spacer(modifier = Modifier.height(12.dp))
-                                matchingDoctors.forEach { doc ->
-                                    MediSlotCard(
-                                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(48.dp)
-                                                    .clip(CircleShape)
-                                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.primary)
-                                            }
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(text = doc.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                                Text(text = "${doc.department} • ${doc.hospital}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                            MediSlotSecondaryButton(
-                                                text = "Book",
-                                                onClick = { onBookClick(doc.id) },
-                                                modifier = Modifier.width(76.dp)
-                                            )
-                                        }
+                                        MediSlotSecondaryButton(
+                                            text = "Copy Info",
+                                            onClick = {
+                                                val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboardManager.setPrimaryClip(ClipData.newPlainText("Symptom Analysis", rawTextRepresentation))
+                                                Toast.makeText(context, "Copied response to clipboard", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        MediSlotButton(
+                                            text = "Re-analyze",
+                                            onClick = {
+                                                symptomsText = item.symptoms
+                                                runAnalysis(item.symptoms, false)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
                                     }
                                 }
                             }
+                            Spacer(modifier = Modifier.height(16.dp))
                         }
-                        else -> {
-                            // Idle/No query run yet
+                    }
+
+                    // Suggested Doctors based on latest report
+                    val latestItem = symptomHistory.firstOrNull()
+                    if (latestItem != null) {
+                        val response = latestItem.response
+                        val suggestedDeptName = response.possibleConditions.firstOrNull() ?: "General Medicine"
+                        val matchingDoctors = MockData.doctors.filter { doc ->
+                            doc.department.contains(suggestedDeptName, ignoreCase = true) ||
+                            response.doctorVisitRecommendation.contains(doc.department, ignoreCase = true) ||
+                            doc.department.contains("Cardiology")
+                        }
+
+                        if (matchingDoctors.isNotEmpty()) {
+                            SectionHeader(title = "Suggested Available Specialists")
+                            Spacer(modifier = Modifier.height(12.dp))
+                            matchingDoctors.forEach { doc ->
+                                MediSlotCard(
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(text = doc.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text(text = "${doc.department} • ${doc.hospital}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        MediSlotSecondaryButton(
+                                            text = "Book",
+                                            onClick = { onBookClick(doc.id) },
+                                            modifier = Modifier.width(76.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -3494,11 +3574,11 @@ private fun ProfileInfoRow(icon: ImageVector, label: String, value: String) {
 // ==========================================================
 @Composable
 fun SettingsScreen(onNavigateBack: () -> Unit) {
-    var checkDarkMode by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    val checkDarkMode = com.medislot.app.ui.theme.ThemeManager.isDarkMode
     var dataSharing by remember { mutableStateOf(false) }
     var pushNotifs by remember { mutableStateOf(true) }
     
-    val context = LocalContext.current
     var showDialogType by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
@@ -3530,7 +3610,12 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
                             Spacer(modifier = Modifier.width(12.dp))
                             Text("Dark Mode", style = MaterialTheme.typography.bodyMedium)
                         }
-                        Switch(checked = checkDarkMode, onCheckedChange = { checkDarkMode = it })
+                        Switch(
+                            checked = checkDarkMode,
+                            onCheckedChange = { enabled ->
+                                com.medislot.app.ui.theme.ThemeManager.setDarkMode(context, enabled)
+                            }
+                        )
                     }
 
                     HorizontalDivider(color = Color(0xFF334155).copy(alpha = 0.3f))

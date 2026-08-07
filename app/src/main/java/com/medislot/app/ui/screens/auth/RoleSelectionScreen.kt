@@ -40,13 +40,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.HorizontalDivider
 import com.medislot.app.ui.components.MediSlotButton
 import com.medislot.app.ui.components.MediSlotCard
+import com.medislot.app.ui.components.MediSlotSecondaryButton
 import com.medislot.app.ui.theme.LocalDimens
 
 @Composable
 fun RoleSelectionScreen(
-    onRoleSelected: (String) -> Unit
+    onRoleSelected: (String) -> Unit,
+    onNavigateToDoctorDemo: () -> Unit = {},
+    onNavigateToHospitalDemo: () -> Unit = {}
 ) {
     var selectedRole by remember { mutableStateOf<String?>(null) }
 
@@ -128,6 +132,36 @@ fun RoleSelectionScreen(
                     enabled = selectedRole != null,
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            if (DemoConfig.ENABLE_DEMO_SHORTCUT) {
+                Spacer(modifier = Modifier.height(20.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Demo Access",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    MediSlotSecondaryButton(
+                        text = "Open Doctor Demo",
+                        onClick = onNavigateToDoctorDemo,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MediSlotSecondaryButton(
+                        text = "Open Hospital Admin Demo",
+                        onClick = onNavigateToHospitalDemo,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }

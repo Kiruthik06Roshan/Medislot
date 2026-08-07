@@ -74,7 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
-import com.medislot.app.data.model.MockData
+import com.medislot.app.data.model.*
 import com.medislot.app.ui.components.*
 import com.medislot.app.ui.theme.LocalDimens
 import com.medislot.app.ui.theme.SOSGradient
@@ -87,6 +87,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ListAlt
+import androidx.compose.material3.OutlinedTextField
 
 @Composable
 fun HospitalDashboardScreen(
@@ -94,13 +95,17 @@ fun HospitalDashboardScreen(
     onNavigateToResources: () -> Unit,
     onNavigateToAlerts: () -> Unit,
     onNavigateToAnalytics: () -> Unit,
+    onNavigateToStaffScheduling: () -> Unit,
+    onNavigateToDoctorRecruitment: () -> Unit,
     onLogout: () -> Unit,
-    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    hospitalViewModel: com.medislot.app.viewmodel.HospitalViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val context = LocalContext.current
-    val activeAlerts = MockData.operationalAlerts.count { !it.isResolved && (it.severity == "Critical" || it.severity == "High") }
-    val icuResource = MockData.resources.find { it.name == "ICU Beds" }
-    val oxygenResource = MockData.resources.find { it.name == "Oxygen Reserves" }
+    val resourceState by hospitalViewModel.resourceState.collectAsState()
+    val activeAlerts = resourceState.alerts.count { !it.isResolved && (it.severity == "Critical" || it.severity == "High") }
+    val icuResource = resourceState.icu
+    val oxygenResource = resourceState.oxygen
 
     // AI state collectors
     val briefingState by viewModel.dailyBriefingState.collectAsState()
@@ -404,38 +409,34 @@ fun HospitalDashboardScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // ICU bed card
-                icuResource?.let {
-                    val pctUsed = ((it.total - it.available) * 100) / it.total
-                    MediSlotCard(
-                        onClick = onNavigateToResources,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column {
-                            Icon(Icons.Default.Bed, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("ICU Beds", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${it.available}/${it.total} free", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text("$pctUsed% occupancy", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
-                        }
+                val icuPctUsed = if (icuResource.total > 0) (icuResource.occupied * 100) / icuResource.total else 0
+                MediSlotCard(
+                    onClick = onNavigateToResources,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column {
+                        Icon(Icons.Default.Bed, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("ICU Beds", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${icuResource.available}/${icuResource.total} free", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("$icuPctUsed% occupancy", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 // Oxygen reserves card
-                oxygenResource?.let {
-                    val pctUsed = ((it.total - it.available) * 100) / it.total
-                    MediSlotCard(
-                        onClick = onNavigateToResources,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column {
-                            Icon(Icons.Default.GasMeter, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("Oxygen Reserves", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${it.available} L", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text("$pctUsed% depletion", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                        }
+                val oxygenPctUsed = if (oxygenResource.totalCylinder > 0) ((oxygenResource.totalCylinder - oxygenResource.availableCylinder) * 100) / oxygenResource.totalCylinder else 0
+                MediSlotCard(
+                    onClick = onNavigateToResources,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column {
+                        Icon(Icons.Default.GasMeter, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Oxygen Reserves", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${oxygenResource.availableCylinder} Cyl", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("$oxygenPctUsed% depletion", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -484,7 +485,7 @@ fun HospitalDashboardScreen(
                         icon = Icons.Default.Schedule,
                         title = "Staff Scheduling",
                         subtitle = "Update nurse & doctor shifts",
-                        onClick = { Toast.makeText(context, "Staff scheduling module coming soon!", Toast.LENGTH_SHORT).show() },
+                        onClick = onNavigateToStaffScheduling,
                         modifier = Modifier.weight(1f)
                     )
                     QuickActionCard(
@@ -492,6 +493,22 @@ fun HospitalDashboardScreen(
                         title = "Resource Allocation",
                         subtitle = "Manage backup stocks",
                         onClick = onNavigateToResources,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    QuickActionCard(
+                        icon = Icons.Default.PersonSearch,
+                        title = "Doctor Applications",
+                        subtitle = "Review applicant credentials",
+                        onClick = onNavigateToDoctorRecruitment,
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickActionCard(
+                        icon = Icons.Default.Analytics,
+                        title = "Analytics Desk",
+                        subtitle = "View detailed reports",
+                        onClick = onNavigateToAnalytics,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -887,14 +904,18 @@ fun DoctorManagementScreen(onNavigateBack: () -> Unit) {
 @Composable
 fun ResourceMonitoringScreen(
     onNavigateBack: () -> Unit,
-    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    hospitalViewModel: com.medislot.app.viewmodel.HospitalViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
-    val resources = MockData.resources
-    val insightsState by viewModel.operationalInsightsState.collectAsState()
+    val resourceState by hospitalViewModel.resourceState.collectAsState()
+    val aiRecommendationState by hospitalViewModel.aiRecommendationState.collectAsState()
     val aiStatus by viewModel.aiStatus.collectAsState()
 
+    var selectedMedicine by remember { mutableStateOf("") }
+    var selectedBloodGroup by remember { mutableStateOf("") }
+
     LaunchedEffect(Unit) {
-        viewModel.loadOperationalInsights("82", "148", "4", "10")
+        hospitalViewModel.fetchAiRecommendations(forceRefresh = false)
     }
 
     Scaffold(
@@ -923,174 +944,457 @@ fun ResourceMonitoringScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            if (resources.isEmpty()) {
-                EmptyStateView(
-                    icon = Icons.Default.LocalHospital,
-                    title = "No Resources Tracked",
-                    message = "Everything is quiet. No medical resources are registered in the inventory monitor.",
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp)
-                ) {
-                    item {
-                        when (val state = insightsState) {
-                            is AiState.Loading -> {
-                                Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                                    ThinkingAnimation()
-                                }
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 24.dp)
+            ) {
+                // 1. AI Recommendation / Safety Optimization Plans
+                item {
+                    when (val state = aiRecommendationState) {
+                        is AiState.Loading -> {
+                            Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                                ThinkingAnimation()
                             }
-                            is AiState.Failure -> {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().clickable { viewModel.loadOperationalInsights("82", "148", "4", "10") }.padding(8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("Retry loading AI allocation suggestions...", color = MaterialTheme.colorScheme.primary)
-                                }
+                        }
+                        is AiState.Failure -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { hospitalViewModel.fetchAiRecommendations(forceRefresh = true) }
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Failed: ${state.error}. Tap to retry AI recommendations...", color = MaterialTheme.colorScheme.primary)
                             }
-                            is AiState.Success -> {
-                                val data = state.data
-                                MediSlotCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f))
-                                ) {
-                                    Column(modifier = Modifier.padding(14.dp)) {
-                                        if (state.isFallback) {
-                                            val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
-                                                    .padding(8.dp)
-                                            ) {
-                                                Column {
-                                                    Text("Previous AI Recommendation", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                                    Text("Generated earlier on $formattedTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.height(10.dp))
-                                        }
-                                        if (state.isMock) {
-                                            Box(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = "Sample Recommendation",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.height(10.dp))
-                                        }
+                        }
+                        is AiState.Success -> {
+                            val data = state.data
+                            MediSlotCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f))
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.secondary)
                                             Spacer(modifier = Modifier.width(8.dp))
-                                            Text("AI Staffing & Resource Actions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text("AI Safety & Capacity Analysis", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                         }
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        
-                                        Text("PRIORITY LEVEL: ${data.priorityLevel}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                        Text(data.summary, style = MaterialTheme.typography.bodySmall)
-                                        
+                                        Text(
+                                            text = "Request Audit",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            modifier = Modifier.clickable { hospitalViewModel.fetchAiRecommendations(forceRefresh = true) }
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(data.summary, style = MaterialTheme.typography.bodySmall)
+                                    
+                                    if (data.resourceAllocation.isNotEmpty()) {
                                         Spacer(modifier = Modifier.height(8.dp))
-                                        Text("SUGGESTED IMPROVEMENTS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFEA580C))
-                                        data.suggestedImprovements.forEach { item ->
+                                        Text("SUGGESTED REALLOCATIONS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFEA580C))
+                                        data.resourceAllocation.forEach { item ->
+                                            Text("• $item", style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                    if (data.capacityPlanning.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text("CAPACITY PREPAREDNESS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                                        data.capacityPlanning.forEach { item ->
                                             Text("• $item", style = MaterialTheme.typography.bodySmall)
                                         }
                                     }
                                 }
                             }
-                            else -> {}
+                        }
+                        else -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { hospitalViewModel.fetchAiRecommendations(forceRefresh = true) }
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Tap to generate AI capacity recommendations...", color = MaterialTheme.colorScheme.primary)
+                            }
                         }
                     }
+                }
 
-                    items(resources) { res ->
-                        val progress = res.available.toFloat() / res.total.toFloat()
-                        val (color, status) = if (progress < 0.25f) {
-                            Pair(MaterialTheme.colorScheme.error, "Critical")
-                        } else if (progress < 0.6f) {
-                            Pair(Color(0xFFF59E0B), "Warning")
-                        } else {
-                            Pair(MaterialTheme.colorScheme.secondary, "Normal")
+                // 2. Simulation Event Control Panel
+                item {
+                    MediSlotCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Simulation Control Panel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            }
+                            Text(
+                                text = "Simulate active hospital events to test real-time alerts, recomputed stats, and reactive logs.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Patient flows
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                MediSlotSecondaryButton(
+                                    text = "Admit Patient (+Beds)",
+                                    onClick = { hospitalViewModel.admitPatient() },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                MediSlotSecondaryButton(
+                                    text = "Discharge (-Beds)",
+                                    onClick = { hospitalViewModel.dischargePatient() },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                MediSlotSecondaryButton(
+                                    text = "Admit ICU (+ICU)",
+                                    onClick = { hospitalViewModel.admitToIcu() },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                MediSlotSecondaryButton(
+                                    text = "Discharge ICU (-ICU)",
+                                    onClick = { hospitalViewModel.dischargeFromIcu() },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                MediSlotSecondaryButton(
+                                    text = "Assign Amb (+Busy)",
+                                    onClick = { hospitalViewModel.assignAmbulance() },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                MediSlotSecondaryButton(
+                                    text = "Release Amb (-Busy)",
+                                    onClick = { hospitalViewModel.releaseAmbulance() },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Dispense Medicine Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(1.5f)) {
+                                    OutlinedTextField(
+                                        value = selectedMedicine,
+                                        onValueChange = { selectedMedicine = it },
+                                        placeholder = { Text("E.g., Paracetamol 500mg", fontSize = 12.sp) },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                MediSlotButton(
+                                    text = "Dispense Med",
+                                    onClick = {
+                                        if (selectedMedicine.isNotBlank()) {
+                                            hospitalViewModel.dispenseMedicine(selectedMedicine.trim())
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Issue Blood Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(1.5f)) {
+                                    OutlinedTextField(
+                                        value = selectedBloodGroup,
+                                        onValueChange = { selectedBloodGroup = it },
+                                        placeholder = { Text("E.g., O- or A+", fontSize = 12.sp) },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                MediSlotButton(
+                                    text = "Issue Blood",
+                                    onClick = {
+                                        if (selectedBloodGroup.isNotBlank()) {
+                                            hospitalViewModel.issueBlood(selectedBloodGroup.trim().uppercase())
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Oxygen reserves trigger
+                            MediSlotSecondaryButton(
+                                text = "Consume Oxygen Cylinder",
+                                onClick = { hospitalViewModel.useOxygen() },
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
+                    }
+                }
 
-                        val used = res.total - res.available
-                        val pctUsed = if (res.total > 0) (used * 100) / res.total else 0
-                        val resIcon = when (res.name.lowercase()) {
-                            "icu beds", "emergency beds" -> Icons.Default.Bed
-                            "oxygen reserves" -> Icons.Default.GasMeter
-                            "ventilators" -> Icons.Default.MedicalServices
-                            "on-call nurses", "duty doctors" -> Icons.Default.People
-                            else -> Icons.Default.LocalHospital
+                // Beds Card
+                item {
+                    val beds = resourceState.beds
+                    val bedsProgress = if (beds.totalBeds > 0) beds.availableBeds.toFloat() / beds.totalBeds.toFloat() else 0f
+                    MediSlotCard {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Bed, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("General Ward Beds", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                }
+                                StatusChip(status = if (beds.availableBeds < 10) "Low Available" else "Normal")
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Occupied: ${beds.occupiedBeds} • Free: ${beds.availableBeds} • Total: ${beds.totalBeds}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LinearProgressIndicator(
+                                progress = { bedsProgress },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                                color = if (beds.availableBeds < 10) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                            )
                         }
+                    }
+                }
 
-                        MediSlotCard {
-                            Column {
+                // ICU Beds Card
+                item {
+                    val icu = resourceState.icu
+                    val icuProgress = if (icu.total > 0) icu.available.toFloat() / icu.total.toFloat() else 0f
+                    MediSlotCard {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Bed, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("ICU Ward Beds", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                }
+                                StatusChip(status = if (icu.available == 0) "ICU Full" else if (icu.available < 3) "Critical" else "Normal")
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Occupied: ${icu.occupied} • Free: ${icu.available} • Total: ${icu.total}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LinearProgressIndicator(
+                                progress = { icuProgress },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                                color = if (icu.available < 3) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                            )
+                        }
+                    }
+                }
+
+                // Oxygen Reserves Card
+                item {
+                    val oxy = resourceState.oxygen
+                    val oxyProgress = if (oxy.totalCylinder > 0) oxy.availableCylinder.toFloat() / oxy.totalCylinder.toFloat() else 0f
+                    MediSlotCard {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.GasMeter, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Oxygen Cylinder Reserves", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                }
+                                StatusChip(status = if (oxy.availableCylinder < oxy.threshold) "Low Stock" else "Safe")
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Available: ${oxy.availableCylinder} Cylinders • Total: ${oxy.totalCylinder} (Threshold: ${oxy.threshold})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LinearProgressIndicator(
+                                progress = { oxyProgress },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                                color = if (oxy.availableCylinder < oxy.threshold) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                            )
+                        }
+                    }
+                }
+
+                // Ambulance Fleet Card
+                item {
+                    val amb = resourceState.ambulances
+                    val ambTotal = amb.available + amb.busy
+                    val ambProgress = if (ambTotal > 0) amb.available.toFloat() / ambTotal.toFloat() else 0f
+                    MediSlotCard {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.LocalHospital, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Ambulance Fleet Status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                }
+                                StatusChip(status = if (amb.available == 0) "No Ambulance" else "Normal")
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Available: ${amb.available} • Dispatched/Busy: ${amb.busy} • Total: $ambTotal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LinearProgressIndicator(
+                                progress = { ambProgress },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                                color = if (amb.available == 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                            )
+                        }
+                    }
+                }
+
+                // Medicines Inventory
+                item {
+                    MediSlotCard {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.MedicalServices, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Pharmacy Medicines", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            resourceState.medicines.forEach { med ->
+                                val isLow = med.quantity < med.threshold
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.Top
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Row(
-                                        modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(resIcon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                                        }
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column {
-                                            Text(res.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            Text("Category: ${res.category} • ${res.lastUpdated}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                    Column(horizontalAlignment = Alignment.End) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "${res.available} / ${res.total}",
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                    Text(med.medicineName, style = MaterialTheme.typography.bodyMedium)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${med.quantity} unit",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isLow) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (isLow) {
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            StatusChip(status = status)
-                                        }
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text("$pctUsed% used", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color)
-                                            if (res.trend.isNotEmpty()) {
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text(
-                                                    text = res.trend,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = if (res.isTrendPositive) Color(0xFF22C55E) else Color(0xFFEF4444)
-                                                )
-                                            }
+                                            StatusChip(status = "Low")
                                         }
                                     }
                                 }
-                                
-                                Spacer(modifier = Modifier.height(16.dp))
-                                
-                                LinearProgressIndicator(
-                                    progress = { progress },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp)
-                                        .clip(CircleShape),
-                                    color = color,
-                                    trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
-                                )
+                            }
+                        }
+                    }
+                }
+
+                // Blood Bank Reserves
+                item {
+                    MediSlotCard {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.LocalHospital, null, tint = Color(0xFFEF4444), modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Blood Bank Reserves", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            resourceState.bloodBank.forEach { blood ->
+                                val isLow = blood.units < 5
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Blood Group ${blood.bloodGroup}", style = MaterialTheme.typography.bodyMedium)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${blood.units} units",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isLow) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (isLow) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            StatusChip(status = "Critical")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Medical Devices & Equipment
+                item {
+                    MediSlotCard {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Analytics, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Medical Devices & Equipment", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            resourceState.equipment.forEach { eq ->
+                                val isMaint = eq.status == "Maintenance"
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(eq.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                        Text("Type: ${eq.type}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        StatusChip(status = eq.status)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = if (isMaint) "Fix Equipment" else "Maintenance",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.clickable {
+                                                if (isMaint) {
+                                                    hospitalViewModel.completeEquipmentMaintenance(eq.id)
+                                                } else {
+                                                    hospitalViewModel.maintainEquipment(eq.id)
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -1106,10 +1410,12 @@ fun ResourceMonitoringScreen(
 @Composable
 fun AlertsScreen(
     onNavigateBack: () -> Unit,
-    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    hospitalViewModel: com.medislot.app.viewmodel.HospitalViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val context = LocalContext.current
-    var alertsList by remember { mutableStateOf(MockData.operationalAlerts.filter { !it.isResolved }) }
+    val resourceState by hospitalViewModel.resourceState.collectAsState()
+    val alertsList = resourceState.alerts
     val briefingState by viewModel.dailyBriefingState.collectAsState()
     val notificationState by viewModel.notificationState.collectAsState()
     val aiStatus by viewModel.aiStatus.collectAsState()
@@ -1350,9 +1656,10 @@ fun AlertsScreen(
                                                 overflow = TextOverflow.Ellipsis,
                                                 modifier = Modifier.weight(1f)
                                             )
+                                            val formattedTime = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(alert.timestamp))
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
-                                                text = alert.timestamp,
+                                                text = formattedTime,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -1387,8 +1694,7 @@ fun AlertsScreen(
                                 ) {
                                     TextButton(
                                         onClick = {
-                                            MockData.operationalAlerts.find { it.id == alert.id }?.isResolved = true
-                                            alertsList = MockData.operationalAlerts.filter { !it.isResolved }
+                                            hospitalViewModel.resolveAlert(alert.id)
                                             Toast.makeText(context, "Alert resolved successfully!", Toast.LENGTH_SHORT).show()
                                         }
                                     ) {
@@ -1410,9 +1716,12 @@ fun AlertsScreen(
 @Composable
 fun AnalyticsScreen(
     onNavigateBack: () -> Unit,
-    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    hospitalViewModel: com.medislot.app.viewmodel.HospitalViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val depts = MockData.departmentsUsage
+    val resourceState by hospitalViewModel.resourceState.collectAsState()
+    val analyticsState by hospitalViewModel.resourceAnalytics.collectAsState()
     val briefingState by viewModel.dailyBriefingState.collectAsState()
     val aiStatus by viewModel.aiStatus.collectAsState()
 
@@ -1518,25 +1827,25 @@ fun AnalyticsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Average Patient Waiting Time
+                    // Bed occupancy %
                     MediSlotCard(modifier = Modifier.weight(1f)) {
                         Column {
-                            Icon(Icons.Default.AccessTime, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.Bed, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Avg Wait Time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("24 mins", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text("-4 mins vs yesterday", style = MaterialTheme.typography.labelSmall, color = Color(0xFF22C55E))
+                            Text("Bed Occupancy", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${analyticsState.bedOccupancyPercentage.toInt()}%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("General ward rate", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                         }
                     }
 
-                    // Bed Utilization
+                    // ICU utilization %
                     MediSlotCard(modifier = Modifier.weight(1f)) {
                         Column {
                             Icon(Icons.Default.Bed, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Bed Utilization", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("85%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text("Optimal threshold", style = MaterialTheme.typography.labelSmall, color = Color(0xFF22C55E))
+                            Text("ICU Beds", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${analyticsState.icuOccupancyPercentage.toInt()}%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("ICU ward rate", style = MaterialTheme.typography.labelSmall, color = if (analyticsState.icuOccupancyPercentage > 85) Color(0xFFEF4444) else Color(0xFF22C55E))
                         }
                     }
                 }
@@ -1545,25 +1854,52 @@ fun AnalyticsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Doctor Utilization
+                    // Ambulance utilization
                     MediSlotCard(modifier = Modifier.weight(1f)) {
                         Column {
-                            Icon(Icons.Default.People, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.LocalHospital, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Doctor Utilization", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("78%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text("Active duty loading", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("Ambulance Util", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${analyticsState.ambulanceUtilizationPercentage.toInt()}%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("Fleet in service", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
 
-                    // Daily Admissions Trend
+                    // Medicines consumed
                     MediSlotCard(modifier = Modifier.weight(1f)) {
                         Column {
-                            Icon(Icons.Default.TrendingUp, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.MedicalServices, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Daily Admissions", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("+12% Today", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text("High intake volume", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            Text("Meds Dispensed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${analyticsState.medicineConsumptionCount} units", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("Dispensing cycle", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Oxygen consumed
+                    MediSlotCard(modifier = Modifier.weight(1f)) {
+                        Column {
+                            Icon(Icons.Default.GasMeter, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Oxygen Consumed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${analyticsState.oxygenConsumptionCount} Cyl", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("Oxygen reserves pull", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+
+                    // Blood issued
+                    MediSlotCard(modifier = Modifier.weight(1f)) {
+                        Column {
+                            Icon(Icons.Default.LocalHospital, null, tint = Color(0xFFEF4444), modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Blood Units Issued", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${analyticsState.bloodConsumptionCount} units", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("Transfusion pool pull", style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF4444))
                         }
                     }
                 }
@@ -1660,6 +1996,34 @@ fun AnalyticsScreen(
                                         trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            SectionHeader(
+                title = "Live Simulator Logs",
+                subtitle = "Real-time updates of hospital inventory operations."
+            )
+            if (resourceState.logs.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                    Text("No simulator logs generated yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    resourceState.logs.forEach { log ->
+                        val logTime = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(log.timestamp))
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(log.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                Text(logTime, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }

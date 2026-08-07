@@ -27,6 +27,13 @@ enum class AiStatus {
 
 data class ChatMessage(val text: String, val isUser: Boolean)
 
+data class SymptomAnalysisHistoryItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val symptoms: String,
+    val response: com.medislot.app.data.ai.SymptomCheckResponse,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     private val service = GeminiService(application)
@@ -164,10 +171,28 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     private val retryCounts = mutableMapOf<String, Int>()
     private var wasOffline = false
 
+    private var lastCheckedSymptoms: String = ""
+    val symptomAnalysisHistory = androidx.compose.runtime.mutableStateListOf<SymptomAnalysisHistoryItem>()
+
     init {
         wasOffline = !service.isOnline()
         _isOnlineFlow.value = service.isOnline()
         monitorNetwork()
+
+        viewModelScope.launch {
+            _symptomCheckState.collect { state ->
+                if (state is AiState.Success) {
+                    val data = state.data
+                    val alreadyExists = symptomAnalysisHistory.any { it.response == data }
+                    if (!alreadyExists && lastCheckedSymptoms.isNotEmpty()) {
+                        symptomAnalysisHistory.add(0, SymptomAnalysisHistoryItem(
+                            symptoms = lastCheckedSymptoms,
+                            response = data
+                        ))
+                    }
+                }
+            }
+        }
     }
 
     fun showSnackbar(message: String) {
@@ -238,7 +263,9 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
                 val result = task(forceRefresh)
                 if (result.isSuccess) {
                     stateFlow.value = AiState.Success(result.getOrThrow())
-                    showSnackbar("AI response generated successfully.")
+                    if (featureName != "checkSymptoms") {
+                        showSnackbar("AI response generated successfully.")
+                    }
                 } else {
                     val error = result.exceptionOrNull() ?: Exception("Unknown error")
                     handleFailure(error, featureName, stateFlow, task)
@@ -259,14 +286,18 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         if (error is FallbackCacheException) {
             @Suppress("UNCHECKED_CAST")
             stateFlow.value = AiState.Success(error.cachedData as T, isFallback = true, timestamp = error.timestamp)
-            showSnackbar("Using cached recommendation.")
+            if (featureName != "checkSymptoms") {
+                showSnackbar("Using cached recommendation.")
+            }
             return
         }
 
         if (error is MockFallbackException) {
             @Suppress("UNCHECKED_CAST")
             stateFlow.value = AiState.Success(error.mockData as T, isMock = true)
-            showSnackbar("Displaying sample recommendation.")
+            if (featureName != "checkSymptoms") {
+                showSnackbar("Displaying sample recommendation.")
+            }
             return
         }
 
@@ -292,13 +323,17 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
                 val retryResult = task(true)
                 if (retryResult.isSuccess) {
                     stateFlow.value = AiState.Success(retryResult.getOrThrow())
-                    showSnackbar("AI response generated successfully.")
+                    if (featureName != "checkSymptoms") {
+                        showSnackbar("AI response generated successfully.")
+                    }
                 } else {
                     val retryErr = retryResult.exceptionOrNull() ?: Exception("Retry failed")
                     if (retryErr is MockFallbackException) {
                         @Suppress("UNCHECKED_CAST")
                         stateFlow.value = AiState.Success(retryErr.mockData as T, isMock = true)
-                        showSnackbar("Displaying sample recommendation.")
+                        if (featureName != "checkSymptoms") {
+                            showSnackbar("Displaying sample recommendation.")
+                        }
                     } else {
                         val retryFriendly = GeminiErrorMapper.map(retryErr, featureName)
                         stateFlow.value = AiState.Failure(retryFriendly.title + "\n\n" + retryFriendly.message)
@@ -312,9 +347,15 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     // Patient Actions
     fun checkSymptoms(symptoms: String, forceRefresh: Boolean = false) {
+        lastCheckedSymptoms = symptoms
         executeAiTask("checkSymptoms", _symptomCheckState, { symptomCheckJob }, { symptomCheckJob = it }, forceRefresh) {
             repository.checkSymptoms(symptoms, it)
         }
+    }
+
+    fun clearSymptomHistory() {
+        symptomAnalysisHistory.clear()
+        _symptomCheckState.value = AiState.Idle
     }
 
     fun explainReport(reportText: String, forceRefresh: Boolean = false) {

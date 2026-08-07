@@ -1,5 +1,7 @@
 package com.medislot.app.data.model
 
+import androidx.compose.runtime.mutableStateListOf
+
 data class PatientProfileData(
     val name: String,
     val age: Int,
@@ -125,7 +127,7 @@ object MockData {
         )
     )
 
-    val doctors = listOf(
+    val doctors = mutableStateListOf(
         DoctorProfileData(
             id = "doc_1",
             name = "Dr. John Doe",
@@ -213,7 +215,7 @@ object MockData {
         )
     )
 
-    val resources = listOf(
+    val resources = mutableStateListOf(
         HospitalResource("res_1", "ICU Beds", 20, 4, "beds", "ICU", "Updated 2 mins ago", "-5%", false),
         HospitalResource("res_2", "Emergency Beds", 40, 12, "beds", "ICU", "Updated 5 mins ago", "+8%", true),
         HospitalResource("res_3", "Oxygen Reserves", 1000, 780, "Liters", "Gas", "Updated 1 min ago", "-12%", false),

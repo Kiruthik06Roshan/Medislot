@@ -4,8 +4,12 @@ sealed class Screen(val route: String) {
     // Auth Routes
     object Splash : Screen("splash")
     object Onboarding : Screen("onboarding")
-    object Login : Screen("login")
-    object Register : Screen("register")
+    object Login : Screen("login/{role}") {
+        fun createRoute(role: String) = "login/$role"
+    }
+    object Register : Screen("register/{role}") {
+        fun createRoute(role: String) = "register/$role"
+    }
     object ForgotPassword : Screen("forgot_password")
     object RoleSelection : Screen("role_selection")
 
@@ -49,4 +53,12 @@ sealed class Screen(val route: String) {
     object HospitalAlerts : Screen("hospital_alerts")
     object HospitalAnalytics : Screen("hospital_analytics")
     object HospitalProfile : Screen("hospital_profile")
+    object HospitalStaffScheduling : Screen("hospital_staff_scheduling")
+    object HospitalDoctorRecruitment : Screen("hospital_doctor_recruitment")
+
+    // Verification Workflow Routes
+    object VerificationStatus : Screen("verification_status/{role}/{hospitalName}") {
+        fun createRoute(role: String, hospitalName: String = "None") = "verification_status/$role/$hospitalName"
+    }
+    object SuperAdminDashboard : Screen("super_admin")
 }
