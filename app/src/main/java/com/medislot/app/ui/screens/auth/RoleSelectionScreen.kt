@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -50,7 +51,8 @@ import com.medislot.app.ui.theme.LocalDimens
 fun RoleSelectionScreen(
     onRoleSelected: (String) -> Unit,
     onNavigateToDoctorDemo: () -> Unit = {},
-    onNavigateToHospitalDemo: () -> Unit = {}
+    onNavigateToHospitalDemo: () -> Unit = {},
+    onNavigateToSuperAdminDemo: () -> Unit = {}
 ) {
     var selectedRole by remember { mutableStateOf<String?>(null) }
 
@@ -120,6 +122,16 @@ fun RoleSelectionScreen(
                     isSelected = selectedRole == "hospital",
                     onClick = { selectedRole = "hospital" }
                 )
+
+                RoleCard(
+                    roleId = "super_admin",
+                    title = "Super Admin Console",
+                    description = "Hospital approvals, doctor verification credentials, platform audit logs & live metrics.",
+                    icon = Icons.Default.Settings,
+                    color = MaterialTheme.colorScheme.error,
+                    isSelected = selectedRole == "super_admin",
+                    onClick = { selectedRole = "super_admin" }
+                )
             }
  
             Spacer(modifier = Modifier.height(32.dp))
@@ -162,6 +174,12 @@ fun RoleSelectionScreen(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                Spacer(modifier = Modifier.height(10.dp))
+                MediSlotSecondaryButton(
+                    text = "Open Super Admin Demo",
+                    onClick = onNavigateToSuperAdminDemo,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }

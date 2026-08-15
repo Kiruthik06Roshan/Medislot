@@ -10,7 +10,9 @@ import com.medislot.app.ui.theme.MediSlotTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        org.maplibre.android.MapLibre.getInstance(applicationContext)
         com.medislot.app.ui.theme.ThemeManager.initialize(applicationContext)
+        com.medislot.app.data.local.DatabaseProvider.initialize(applicationContext)
         enableEdgeToEdge()
         setContent {
             MediSlotTheme(darkTheme = com.medislot.app.ui.theme.ThemeManager.isDarkMode) {

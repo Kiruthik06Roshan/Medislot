@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.medislot.app.data.model.LabReport
+import kotlinx.coroutines.launch
 import com.medislot.app.data.model.NotificationItem
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -641,6 +642,28 @@ object DoctorWorkspaceState {
             val patient = appointments[index]
             patient.status = "Completed"
             patient.actualDurationMinutes = durationMinutes
+            
+            // Backend sync if not in demo mode
+            if (!com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    try {
+                        com.medislot.app.network.RetrofitClient.apiService.updateAppointmentStatus(patientId, "Completed")
+                        com.medislot.app.network.RetrofitClient.apiService.createMedicalRecord(
+                            com.medislot.app.network.MedicalRecordRequest(
+                                patient_id = patient.id,
+                                title = "Consultation Summary - " + currentDiagnosis.primaryDiagnosis,
+                                record_type = "Consultation",
+                                date = todayDate,
+                                file_url = null,
+                                result_summary = "Diagnosis: " + currentDiagnosis.primaryDiagnosis + ". Notes: " + currentDiagnosis.doctorNotes,
+                                doctor_id = doctorProfile.name
+                            )
+                        )
+                    } catch (e: Exception) {
+                        // Fail silent
+                    }
+                }
+            }
             
             // Commit all input buffer fields into patient file
             patient.vitals = currentVitals.copy()

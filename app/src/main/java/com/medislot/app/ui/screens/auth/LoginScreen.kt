@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -55,6 +56,8 @@ import com.medislot.app.ui.theme.LocalDimens
 import com.medislot.app.utils.ValidationUtils
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun LoginScreen(
@@ -64,6 +67,7 @@ fun LoginScreen(
     onNavigateToForgotPassword: () -> Unit,
     onNavigateToSuperAdmin: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var logoClickCount by remember { mutableStateOf(0) }
     var usernameOrEmail by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -78,6 +82,7 @@ fun LoginScreen(
         "patient" -> "Patient Portal"
         "doctor" -> "Doctor Portal"
         "hospital" -> "Hospital Coordinator"
+        "super_admin" -> "Super Admin Console"
         else -> "MediSlot Portal"
     }
 
@@ -85,6 +90,7 @@ fun LoginScreen(
         "patient" -> Icons.Default.Person
         "doctor" -> Icons.Default.MedicalServices
         "hospital" -> Icons.Default.LocalHospital
+        "super_admin" -> Icons.Default.Settings
         else -> Icons.Default.MonitorHeart
     }
 
@@ -92,6 +98,7 @@ fun LoginScreen(
         "patient" -> MaterialTheme.colorScheme.primary
         "doctor" -> MaterialTheme.colorScheme.secondary
         "hospital" -> Color(0xFFF59E0B) // Amber
+        "super_admin" -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.primary
     }
 
@@ -123,11 +130,17 @@ fun LoginScreen(
         if (isValid) {
             coroutineScope.launch {
                 isLoading = true
-                // TODO: Connect with backend authentication API
-                // Simulating network request delay
-                delay(1200)
+                val repo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                val result = repo.login(usernameOrEmail, password)
                 isLoading = false
-                onLoginSuccess(usernameOrEmail)
+                result.fold(
+                    onSuccess = { response ->
+                        onLoginSuccess(response.email)
+                    },
+                    onFailure = {
+                        Toast.makeText(context, it.message ?: "Authentication failed", Toast.LENGTH_SHORT).show()
+                    }
+                )
             }
         }
     }
@@ -146,19 +159,12 @@ fun LoginScreen(
         ) {
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Brand / Role Header Icon (Tapping 5 times opens Super Admin Portal)
+            // Brand / Role Header Icon
             Box(
                 modifier = Modifier
                     .size(80.dp)
                     .clip(CircleShape)
-                    .background(themeColor.copy(alpha = 0.08f))
-                    .clickable {
-                        logoClickCount += 1
-                        if (logoClickCount >= 5) {
-                            logoClickCount = 0
-                            onNavigateToSuperAdmin()
-                        }
-                    },
+                    .background(themeColor.copy(alpha = 0.08f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

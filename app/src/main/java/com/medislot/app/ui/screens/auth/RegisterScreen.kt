@@ -431,11 +431,34 @@ fun RegisterScreen(
                 // Final submission
                 coroutineScope.launch {
                     isLoading = true
-                    // TODO: Connect with real registration endpoint
-                    delay(1500)
+                    val repo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                    val result = repo.register(
+                        email = if (role == "patient") patEmail else if (role == "doctor") docEmail else adminEmail,
+                        password = if (role == "patient") patPassword else if (role == "doctor") docPassword else adminPassword,
+                        fullName = if (role == "patient") patName else if (role == "doctor") docName else adminName,
+                        role = role
+                    )
                     
-                    // Seed in-memory verification status for simulation
+                    // Seed local/API verification status for simulation
                     if (role == "doctor") {
+                        try {
+                            val registeredUid = result.getOrNull()?.uid
+                            com.medislot.app.network.RetrofitClient.apiService.createDoctorApplication(
+                                com.medislot.app.network.DoctorApplicationRequest(
+                                    uid = registeredUid,
+                                    name = docName,
+                                    specialization = docSpecialization,
+                                    experience_years = docExperience,
+                                    medical_registration_number = docRegistrationNumber,
+                                    mbbs_institution = docMbbsInstitution,
+                                    docs_attached = "MBBS_Degree.pdf",
+                                    resume_file = "resume.pdf",
+                                    selected_hospital = docHospitalName
+                                )
+                            )
+                        } catch (e: Exception) {
+                            // Fallback
+                        }
                         com.medislot.app.data.model.VerificationStateStore.addDoctorApplication(
                             name = docName,
                             spec = docSpecialization,
@@ -444,6 +467,25 @@ fun RegisterScreen(
                             filename = "MBBS_Degree.pdf"
                         )
                     } else if (role == "hospital") {
+                        try {
+                            val registeredUid = result.getOrNull()?.uid ?: ""
+                            com.medislot.app.network.RetrofitClient.apiService.registerHospital(
+                                com.medislot.app.network.HospitalRegisterRequest(
+                                    name = hospName,
+                                    uid = registeredUid,
+                                    license_number = hospLicenseNumber,
+                                    registration_number = hospRegistrationNumber,
+                                    address = "$hospAddress, $hospCity, $hospState - $hospPinCode",
+                                    hospital_type = hospType,
+                                    departments = "General,Emergency,ICU",
+                                    contact = hospOfficialPhone,
+                                    admin_name = adminName,
+                                    docs_attached = "License_Doc.pdf"
+                                )
+                            )
+                        } catch (e: Exception) {
+                            // Fallback
+                        }
                         com.medislot.app.data.model.VerificationStateStore.addHospitalApplication(
                             name = hospName,
                             regNum = hospRegistrationNumber,

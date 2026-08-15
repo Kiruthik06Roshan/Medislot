@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
@@ -162,7 +165,12 @@ fun MediSlotApp() {
                         val currentStatus = com.medislot.app.data.model.VerificationStateStore.userVerificationStatus[username] ?: com.medislot.app.data.model.VerificationStatus.PENDING
                         val isApproved = currentStatus == com.medislot.app.data.model.VerificationStatus.APPROVED
 
-                        if (role == "patient" || isApproved) {
+                        if (role == "super_admin") {
+                            activeRole = null
+                            navController.navigate(Screen.SuperAdminDashboard.route) {
+                                popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                            }
+                        } else if (role == "patient" || isApproved) {
                             activeRole = when (role) {
                                 "patient" -> UserRole.PATIENT
                                 "doctor" -> UserRole.DOCTOR
@@ -297,6 +305,13 @@ fun MediSlotApp() {
                         navController.navigate(Screen.HospitalHome.route) {
                             popUpTo(Screen.RoleSelection.route) { inclusive = true }
                         }
+                    },
+                    onNavigateToSuperAdminDemo = {
+                        com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = true
+                        activeRole = null
+                        navController.navigate(Screen.SuperAdminDashboard.route) {
+                            popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                        }
                     }
                 )
             }
@@ -421,6 +436,74 @@ fun MediSlotApp() {
             // DOCTOR FLOW
             // ==========================================
             composable(Screen.DoctorHome.route) {
+                val coroutineScope = rememberCoroutineScope()
+                LaunchedEffect(Unit) {
+                    if (!com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                        coroutineScope.launch {
+                            try {
+                                val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                                val docRepo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+                                val uid = authRepo.getUid()
+                                if (uid != null) {
+                                    val result = docRepo.getProfile(uid)
+                                    result.fold(
+                                        onSuccess = { response ->
+                                            com.medislot.app.ui.screens.doctor.DoctorWorkspaceState.doctorProfile =
+                                                com.medislot.app.ui.screens.doctor.DoctorProfileInfo(
+                                                    name = response.name,
+                                                    specialization = response.specialization,
+                                                    hospital = response.hospital_name,
+                                                    experience = "${response.experience_years} Years",
+                                                    contactNumber = response.contact,
+                                                    averageConsultationTime = 12
+                                                )
+                                            
+                                            // Fetch real queue/appointments
+                                            val apptResult = docRepo.getAppointments(response.id)
+                                            apptResult.fold(
+                                                onSuccess = { appts ->
+                                                    com.medislot.app.ui.screens.doctor.DoctorWorkspaceState.appointments.clear()
+                                                    val mapped = appts.map { apt ->
+                                                        com.medislot.app.ui.screens.doctor.PatientRecord(
+                                                            id = apt.id,
+                                                            name = "Patient " + apt.patient_id.takeLast(4),
+                                                            queueNumber = apt.queue_number,
+                                                            appointmentTime = apt.time,
+                                                            age = 30,
+                                                            gender = "Male",
+                                                            bloodGroup = "O+",
+                                                            height = "170 cm",
+                                                            weight = "70 kg",
+                                                            bmi = "24.2",
+                                                            allergies = emptyList(),
+                                                            medications = emptyList(),
+                                                            history = emptyList(),
+                                                            previousVisits = emptyList(),
+                                                            uploadedReports = emptyList(),
+                                                            emergencyContact = "",
+                                                            symptoms = "Consultation",
+                                                            priority = "Normal",
+                                                            status = when (apt.status) {
+                                                                "Upcoming" -> "Waiting"
+                                                                "CheckedIn" -> "Checked In"
+                                                                "InConsultation" -> "In Consultation"
+                                                                else -> apt.status
+                                                            }
+                                                        )
+                                                    }
+                                                    com.medislot.app.ui.screens.doctor.DoctorWorkspaceState.appointments.addAll(mapped)
+                                                },
+                                                onFailure = {}
+                                            )
+                                        },
+                                        onFailure = {}
+                                    )
+                                }
+                            } catch (e: Exception) {}
+                        }
+                    }
+                }
+
                 Column(modifier = Modifier.fillMaxSize()) {
                     if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
                         DemoBanner()

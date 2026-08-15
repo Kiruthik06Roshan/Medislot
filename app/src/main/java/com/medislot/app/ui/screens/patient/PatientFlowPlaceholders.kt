@@ -85,6 +85,17 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
+import java.util.Calendar
+import java.util.Locale
+import java.text.SimpleDateFormat
+import kotlinx.coroutines.launch
+import android.os.Environment
+import androidx.core.content.FileProvider
+import android.content.Intent
+import android.net.Uri
 import android.content.Context
 import android.content.ClipboardManager
 import android.content.ClipData
@@ -105,12 +116,29 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import org.maplibre.compose.map.MaplibreMap
+import org.maplibre.compose.camera.rememberCameraState
+import org.maplibre.compose.camera.CameraPosition
+import org.maplibre.compose.style.BaseStyle
+import org.maplibre.compose.sources.rememberGeoJsonSource
+import org.maplibre.compose.sources.GeoJsonData
+import org.maplibre.compose.layers.CircleLayer
+import org.maplibre.compose.expressions.dsl.const
+import org.maplibre.spatialk.geojson.Position
+import org.maplibre.spatialk.geojson.Point
+import org.maplibre.spatialk.geojson.Feature
+import org.maplibre.spatialk.geojson.FeatureCollection
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1695,9 +1723,14 @@ fun AppointmentBookingScreen(
 
                     LaunchedEffect(confirmProgress) {
                         if (confirmProgress) {
-                            delay(1200)
+                            val repo = com.medislot.app.data.repository.AppointmentRepositoryImpl()
+                            val parsedTime = System.currentTimeMillis()
+                            val result = repo.bookAppointment(
+                                doctorId = selectedDoctor?.id ?: "doc_demo",
+                                dateTime = parsedTime
+                            )
                             val newAppt = AppointmentData(
-                                id = "appt_${System.currentTimeMillis()}",
+                                id = result.getOrNull() ?: ("appt_${System.currentTimeMillis()}"),
                                 doctorName = finalDocName,
                                 department = selectedDoctor?.department ?: selectedDept,
                                 hospital = finalHospital,
@@ -1966,6 +1999,27 @@ fun HospitalNavigationScreen(onNavigateBack: () -> Unit) {
     var selectedHospital by remember { mutableStateOf("City General Hospital") }
     var travelMode by remember { mutableStateOf("Driving") } // "Driving", "Walking"
 
+    val selectedHospitalLatLng = when (selectedHospital) {
+        "City General Hospital" -> Position(longitude = -74.0060, latitude = 40.7128)
+        else -> Position(longitude = -73.9352, latitude = 40.7306)
+    }
+
+    val cameraState = rememberCameraState(
+        firstPosition = CameraPosition(
+            target = selectedHospitalLatLng,
+            zoom = 14.0
+        )
+    )
+
+    LaunchedEffect(selectedHospital) {
+        cameraState.animateTo(
+            finalPosition = CameraPosition(
+                target = selectedHospitalLatLng,
+                zoom = 14.0
+            )
+        )
+    }
+
     val hospitalAddress = when (selectedHospital) {
         "City General Hospital" -> "100 Medical Plaza, Metro City"
         else -> "250 Healthcare Blvd, Metro City"
@@ -2018,41 +2072,31 @@ fun HospitalNavigationScreen(onNavigateBack: () -> Unit) {
                 }
             }
 
-            val surfaceVariantColor = MaterialTheme.colorScheme.surfaceVariant
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(200.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(surfaceVariantColor)
-                    .border(1.5.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
-                contentAlignment = Alignment.Center
+                    .border(1.5.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
             ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    drawRect(
-                        color = surfaceVariantColor,
-                        size = size
+                MaplibreMap(
+                    modifier = Modifier.fillMaxSize(),
+                    cameraState = cameraState,
+                    baseStyle = BaseStyle.Uri("https://tiles.openfreemap.org/styles/liberty")
+                ) {
+                    val geoJsonStr = remember(selectedHospitalLatLng) {
+                        """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[${selectedHospitalLatLng.longitude},${selectedHospitalLatLng.latitude}]},"properties":{}}]}"""
+                    }
+                    val markerSource = rememberGeoJsonSource(
+                        data = GeoJsonData.JsonString(geoJsonStr)
                     )
-                }
-                
-                // Draw mockup map route lines
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.Map,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                        modifier = Modifier.size(56.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Google Maps API Navigation Route",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Map view placeholder for active routes",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    CircleLayer(
+                        id = "hospital-marker-layer",
+                        source = markerSource,
+                        color = const(MaterialTheme.colorScheme.primary),
+                        radius = const(8.dp),
+                        strokeColor = const(Color.White),
+                        strokeWidth = const(2.dp)
                     )
                 }
             }
@@ -2105,12 +2149,33 @@ fun HospitalNavigationScreen(onNavigateBack: () -> Unit) {
                 }
             }
 
-            // Action Button ready for maps integration
+            // Action Button: Launch turn-by-turn navigation via ACTION_VIEW Intent
             MediSlotButton(
                 text = "Navigate to Hospital",
                 onClick = {
-                    // TODO: Future Google Maps API SDK integration
-                    Toast.makeText(context, "Simulating Google Maps Navigation intent routing...", Toast.LENGTH_SHORT).show()
+                    val lat = selectedHospitalLatLng.latitude
+                    val lng = selectedHospitalLatLng.longitude
+                    val geoUri = Uri.parse("geo:$lat,$lng?q=${Uri.encode("$selectedHospital, $hospitalAddress")}")
+                    val mapIntent = Intent(Intent.ACTION_VIEW, geoUri).apply {
+                        setPackage("com.google.android.apps.maps")
+                    }
+                    try {
+                        context.startActivity(mapIntent)
+                    } catch (e: Exception) {
+                        // Fallback 1: Any map app
+                        val genericIntent = Intent(Intent.ACTION_VIEW, geoUri)
+                        try {
+                            context.startActivity(genericIntent)
+                        } catch (e2: Exception) {
+                            // Fallback 2: Web browser maps
+                            val webUri = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng")
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+                            } catch (e3: Exception) {
+                                Toast.makeText(context, "Unable to launch maps navigation.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -2138,6 +2203,193 @@ fun AppointmentHistoryScreen(onNavigateBack: () -> Unit) {
     // Dialog state variables
     var activePrescriptionToView by remember { mutableStateOf<String?>(null) }
     var appointmentList by remember { mutableStateOf(MockData.appointments.toList()) }
+    var appointmentToReschedule by remember { mutableStateOf<com.medislot.app.data.model.AppointmentData?>(null) }
+    var appointmentToCancel by remember { mutableStateOf<com.medislot.app.data.model.AppointmentData?>(null) }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    if (appointmentToReschedule != null) {
+        val appt = appointmentToReschedule!!
+        var selectedDate by remember { mutableStateOf("") }
+        var selectedTime by remember { mutableStateOf("") }
+        val datesList = remember {
+            (1..5).map { offset ->
+                val cal = Calendar.getInstance()
+                cal.add(Calendar.DAY_OF_YEAR, offset)
+                SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
+            }
+        }
+        val slotsList = listOf("09:00 AM", "10:30 AM", "11:00 AM", "02:30 PM", "04:00 PM")
+        val scope = rememberCoroutineScope()
+
+        AlertDialog(
+            onDismissRequest = { appointmentToReschedule = null },
+            title = { Text("Reschedule Appointment", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Doctor: ${appt.doctorName}", fontWeight = FontWeight.SemiBold)
+                    Text("Hospital: ${appt.hospital}")
+                    Text("Current: ${appt.date} at ${appt.time}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    
+                    HorizontalDivider()
+                    
+                    Text("Select New Date:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        datesList.forEach { date ->
+                            val isSelected = selectedDate == date
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedDate = date },
+                                label = { Text(date) }
+                            )
+                        }
+                    }
+                    
+                    Text("Select New Time Slot:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        slotsList.forEach { time ->
+                            val isSelected = selectedTime == time
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedTime = time },
+                                label = { Text(time) }
+                            )
+                        }
+                    }
+                    
+                    if (selectedDate.isNotBlank() && selectedTime.isNotBlank()) {
+                        HorizontalDivider()
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("Reschedule appointment?", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Current: ${appt.date} at ${appt.time}", style = MaterialTheme.typography.bodySmall)
+                                Text("New: $selectedDate at $selectedTime", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (selectedDate.isBlank() || selectedTime.isBlank()) {
+                            Toast.makeText(context, "Please select both a date and time", Toast.LENGTH_SHORT).show()
+                            return@TextButton
+                        }
+                        
+                        scope.launch {
+                            val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+                            if (isDemo) {
+                                val index = MockData.appointments.indexOfFirst { it.id == appt.id }
+                                if (index != -1) {
+                                    MockData.appointments[index] = MockData.appointments[index].copy(
+                                        date = selectedDate,
+                                        time = selectedTime,
+                                        queueNumber = (1..10).random()
+                                    )
+                                }
+                                appointmentList = MockData.appointments.toList()
+                                Toast.makeText(context, "Appointment rescheduled successfully", Toast.LENGTH_SHORT).show()
+                                appointmentToReschedule = null
+                            } else {
+                                val repo = com.medislot.app.data.repository.AppointmentRepositoryImpl()
+                                val result = repo.rescheduleAppointment(appt.id, selectedDate, selectedTime)
+                                result.fold(
+                                    onSuccess = {
+                                        val index = MockData.appointments.indexOfFirst { it.id == appt.id }
+                                        if (index != -1) {
+                                            MockData.appointments[index] = MockData.appointments[index].copy(
+                                                date = selectedDate,
+                                                time = selectedTime
+                                            )
+                                        }
+                                        appointmentList = MockData.appointments.toList()
+                                        Toast.makeText(context, "Appointment rescheduled successfully", Toast.LENGTH_SHORT).show()
+                                        appointmentToReschedule = null
+                                    },
+                                    onFailure = { err ->
+                                        Toast.makeText(context, err.message ?: "Failed to reschedule", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    Text("Confirm Reschedule", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { appointmentToReschedule = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (appointmentToCancel != null) {
+        val appt = appointmentToCancel!!
+        val scope = rememberCoroutineScope()
+        
+        AlertDialog(
+            onDismissRequest = { appointmentToCancel = null },
+            title = { Text("Cancel Appointment", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to cancel your appointment with ${appt.doctorName} on ${appt.date} at ${appt.time}?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+                            if (isDemo) {
+                                val index = MockData.appointments.indexOfFirst { it.id == appt.id }
+                                if (index != -1) {
+                                    MockData.appointments[index] = MockData.appointments[index].copy(status = "Cancelled")
+                                }
+                                appointmentList = MockData.appointments.toList()
+                                Toast.makeText(context, "Consultation cancelled successfully", Toast.LENGTH_SHORT).show()
+                                appointmentToCancel = null
+                            } else {
+                                val repo = com.medislot.app.data.repository.AppointmentRepositoryImpl()
+                                val result = repo.cancelAppointment(appt.id)
+                                result.fold(
+                                    onSuccess = {
+                                        val index = MockData.appointments.indexOfFirst { it.id == appt.id }
+                                        if (index != -1) {
+                                            MockData.appointments[index] = MockData.appointments[index].copy(status = "Cancelled")
+                                        }
+                                        appointmentList = MockData.appointments.toList()
+                                        Toast.makeText(context, "Consultation cancelled successfully", Toast.LENGTH_SHORT).show()
+                                        appointmentToCancel = null
+                                    },
+                                    onFailure = { err ->
+                                        Toast.makeText(context, err.message ?: "Failed to cancel", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    Text("Cancel Appointment", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { appointmentToCancel = null }) {
+                    Text("Keep Appointment")
+                }
+            }
+        )
+    }
 
     LaunchedEffect(isRefreshing) {
         if (isRefreshing) {
@@ -2275,19 +2527,14 @@ fun AppointmentHistoryScreen(onNavigateBack: () -> Unit) {
                                                 MediSlotSecondaryButton(
                                                     text = "Cancel",
                                                     onClick = {
-                                                        val index = MockData.appointments.indexOfFirst { it.id == appt.id }
-                                                        if (index != -1) {
-                                                            MockData.appointments[index] = MockData.appointments[index].copy(status = "Cancelled")
-                                                        }
-                                                        appointmentList = MockData.appointments.toList()
-                                                        Toast.makeText(context, "Consultation cancelled successfully", Toast.LENGTH_SHORT).show()
+                                                        appointmentToCancel = appt
                                                     },
                                                     modifier = Modifier.weight(1f)
                                                 )
                                                 MediSlotButton(
                                                     text = "Reschedule",
                                                     onClick = {
-                                                        Toast.makeText(context, "Reschedule guidelines loaded", Toast.LENGTH_SHORT).show()
+                                                        appointmentToReschedule = appt
                                                     },
                                                     modifier = Modifier.weight(1f)
                                                 )
@@ -2412,6 +2659,8 @@ fun MedicalRecordsScreen(
     // Dialog trigger states
     var activeReportForAi by remember { mutableStateOf<com.medislot.app.data.model.LabReport?>(null) }
     var activeMedicationForAi by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     val reportState by viewModel.reportExplanationState.collectAsState()
     val prescriptionState by viewModel.prescriptionExplanationState.collectAsState()
@@ -2426,7 +2675,8 @@ fun MedicalRecordsScreen(
     }
 
     Scaffold(
-        topBar = { MediSlotTopBar(title = "Health Records Desk", onBackClick = onNavigateBack) }
+        topBar = { MediSlotTopBar(title = "Health Records Desk", onBackClick = onNavigateBack) },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { paddingValues ->
         Box(
             modifier = Modifier
@@ -2532,7 +2782,18 @@ fun MedicalRecordsScreen(
                                             // Redesigned Outlined Download Button (Requirement 7)
                                             OutlinedButton(
                                                 onClick = {
-                                                    Toast.makeText(context, "Downloading PDF for ${report.testName}...", Toast.LENGTH_SHORT).show()
+                                                    downloadAndOpenReportPdf(context, report.testName, report.date, report.result, report.status) { file ->
+                                                        scope.launch {
+                                                            val snackResult = snackbarHostState.showSnackbar(
+                                                                message = "PDF downloaded successfully",
+                                                                actionLabel = "Open PDF",
+                                                                duration = SnackbarDuration.Short
+                                                            )
+                                                            if (snackResult == SnackbarResult.ActionPerformed) {
+                                                                openDownloadedPdf(context, file)
+                                                            }
+                                                        }
+                                                    }
                                                 },
                                                 modifier = Modifier.height(34.dp),
                                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
@@ -2607,7 +2868,18 @@ fun MedicalRecordsScreen(
                                         // Download Outlined Button
                                         OutlinedButton(
                                             onClick = {
-                                                Toast.makeText(context, "Downloading prescription receipt PDF...", Toast.LENGTH_SHORT).show()
+                                                downloadAndOpenReportPdf(context, "Prescription receipt", "Today", med, "Active") { file ->
+                                                    scope.launch {
+                                                        val snackResult = snackbarHostState.showSnackbar(
+                                                            message = "PDF downloaded successfully",
+                                                            actionLabel = "Open PDF",
+                                                            duration = SnackbarDuration.Short
+                                                        )
+                                                        if (snackResult == SnackbarResult.ActionPerformed) {
+                                                            openDownloadedPdf(context, file)
+                                                        }
+                                                    }
+                                                }
                                             },
                                             modifier = Modifier.height(34.dp),
                                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
@@ -3895,4 +4167,99 @@ fun EmptyStateView(
         )
     }
 }
+
+fun downloadAndOpenReportPdf(context: Context, testName: String, date: String, result: String, status: String, onComplete: (java.io.File) -> Unit) {
+    try {
+        val pdfDocument = android.graphics.pdf.PdfDocument()
+        val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+        val page = pdfDocument.startPage(pageInfo)
+        val canvas = page.canvas
+        val paint = android.graphics.Paint()
+
+        // 1. Title Header
+        paint.color = android.graphics.Color.parseColor("#0F3A5F")
+        paint.textSize = 24f
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        canvas.drawText("MEDISLOT CLINICAL REPORT", 50f, 60f, paint)
+
+        paint.color = android.graphics.Color.parseColor("#4A4A4A")
+        paint.textSize = 14f
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC)
+        canvas.drawText("Generated Laboratory Consultation Summary", 50f, 85f, paint)
+
+        // Line separator
+        paint.color = android.graphics.Color.parseColor("#CCCCCC")
+        paint.strokeWidth = 2f
+        canvas.drawLine(50f, 100f, 545f, 100f, paint)
+
+        // 2. Report Details
+        paint.color = android.graphics.Color.BLACK
+        paint.textSize = 16f
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        canvas.drawText("Test details:", 50f, 140f, paint)
+
+        paint.textSize = 14f
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        canvas.drawText("Test Name:", 50f, 180f, paint)
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+        canvas.drawText(testName, 180f, 180f, paint)
+
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        canvas.drawText("Date Checked:", 50f, 220f, paint)
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+        canvas.drawText(date, 180f, 220f, paint)
+
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        canvas.drawText("Clinical Result:", 50f, 260f, paint)
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+        canvas.drawText(result, 180f, 260f, paint)
+
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        canvas.drawText("Status:", 50f, 300f, paint)
+        if (status.uppercase() == "CRITICAL") {
+            paint.color = android.graphics.Color.RED
+        } else {
+            paint.color = android.graphics.Color.parseColor("#2E7D32")
+        }
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        canvas.drawText(status, 180f, 300f, paint)
+
+        // Footer disclaimer
+        paint.color = android.graphics.Color.BLACK
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+        paint.textSize = 12f
+        canvas.drawText("Disclaimer: This report is a verified medical summary. Consult your physician.", 50f, 750f, paint)
+
+        pdfDocument.finishPage(page)
+
+        val downloadDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+        val cleanName = testName.replace("[^a-zA-Z0-9]".toRegex(), "_")
+        val file = java.io.File(downloadDir, "Report_${cleanName}.pdf")
+        val outStream = java.io.FileOutputStream(file)
+        pdfDocument.writeTo(outStream)
+        pdfDocument.close()
+        outStream.close()
+        
+        onComplete(file)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to download PDF: ${e.message}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun openDownloadedPdf(context: Context, file: java.io.File) {
+    try {
+        val uri: Uri = FileProvider.getUriForFile(context, "com.medislot.app.fileprovider", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/pdf")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (e: android.content.ActivityNotFoundException) {
+        Toast.makeText(context, "Report downloaded to: ${file.absolutePath}. Please install a PDF viewer to open it.", Toast.LENGTH_LONG).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, "Error opening file: ${e.message}", Toast.LENGTH_SHORT).show()
+    }
+}
+
 
