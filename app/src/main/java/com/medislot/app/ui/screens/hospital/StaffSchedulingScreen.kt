@@ -58,6 +58,7 @@ fun StaffSchedulingScreen(
     var editingSchedule by remember { mutableStateOf<StaffSchedule?>(null) }
 
     LaunchedEffect(Unit) {
+        viewModel.refreshData()
         viewModel.fetchStaffRecommendations(forceRefresh = false)
     }
 

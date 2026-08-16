@@ -26,11 +26,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from sqlalchemy import text
+
 @app.on_event("startup")
 async def startup_event():
     # Asynchronously initialize PostgreSQL tables on gateway bootstrap
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        alter_queries = [
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS insurance_provider VARCHAR;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS insurance_plan VARCHAR;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS insurance_policy_number VARCHAR;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS insurance_expiry VARCHAR;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS emergency_contact_name VARCHAR;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS emergency_contact_phone VARCHAR;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS emergency_contact_relation VARCHAR;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_heart_rate INTEGER;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_bp VARCHAR;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_spo2 INTEGER;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_temperature FLOAT;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_blood_sugar INTEGER;",
+            "ALTER TABLE staff_members ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+            "ALTER TABLE staff_schedules ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+            "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+            "ALTER TABLE inventory ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+            "ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;"
+        ]
+        for q in alter_queries:
+            try:
+                await conn.execute(text(q))
+            except Exception:
+                pass
 
     # Seed deterministic demo data if needed
     from .database.connection import AsyncSessionLocal

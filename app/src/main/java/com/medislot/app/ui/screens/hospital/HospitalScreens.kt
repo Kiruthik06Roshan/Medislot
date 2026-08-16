@@ -88,6 +88,7 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material3.OutlinedTextField
+import com.medislot.app.network.toDoctorProfileData
 
 @Composable
 fun HospitalDashboardScreen(
@@ -114,15 +115,37 @@ fun HospitalDashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val aiStatus by viewModel.aiStatus.collectAsState()
 
+    val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+    val hospitalProfile by hospitalViewModel.hospitalProfile.collectAsState()
+    val hospitalName = if (isDemo) "City General Hospital" else (hospitalProfile?.name ?: "Loading...")
+
+    val staffMembers by hospitalViewModel.staffMembers.collectAsState()
+    val doctorsOnDutyCount = staffMembers.count { it.role.equals("Doctor", ignoreCase = true) && it.status.equals("On Duty", ignoreCase = true) }
+    val resourceAnalytics by hospitalViewModel.resourceAnalytics.collectAsState()
+
     LaunchedEffect(viewModel) {
         viewModel.snackbarMessage.collect {
             snackbarHostState.showSnackbar(it)
         }
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.loadDailyBriefing("Morning/Afternoon Shift, ICU at 85% occupancy", "Staff shortage in pediatrics department, ED overload risk high")
-        viewModel.loadOperationalInsights("82", "148", "4", "10")
+    LaunchedEffect(resourceState, isDemo) {
+        if (isDemo) {
+            viewModel.loadDailyBriefing("Morning/Afternoon Shift, ICU at 85% occupancy", "Staff shortage in pediatrics department, ED overload risk high")
+            viewModel.loadOperationalInsights("82", "148", "4", "10")
+        } else {
+            if (resourceState.beds.totalBeds > 0) {
+                val metrics = "Beds occupancy: ${resourceState.beds.occupiedBeds}/${resourceState.beds.totalBeds}, ICU: ${icuResource.occupied}/${icuResource.total}, Oxygen cylinders: ${oxygenResource.availableCylinder}/${oxygenResource.totalCylinder}"
+                val activeAlertsText = resourceState.alerts.filter { !it.isResolved && it.severity == "Critical" }.joinToString { it.title }.ifEmpty { "No critical alerts" }
+                viewModel.loadDailyBriefing(metrics, activeAlertsText)
+                
+                val admissions = "0"
+                val waitingTime = "0"
+                val occupancy = "${resourceAnalytics.bedOccupancyPercentage.toInt()}"
+                val utilization = "${resourceAnalytics.ambulanceUtilizationPercentage.toInt()}"
+                viewModel.loadOperationalInsights(admissions, waitingTime, occupancy, utilization)
+            }
+        }
     }
 
     var showBroadcastDialog by remember { mutableStateOf(false) }
@@ -184,7 +207,7 @@ fun HospitalDashboardScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "City General Hospital",
+                text = hospitalName,
                 style = MaterialTheme.typography.displayLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
@@ -218,90 +241,111 @@ fun HospitalDashboardScreen(
             // AI Daily Briefing Card
             SectionHeader(title = "AI Daily Briefing", subtitle = "Today's hospital operations run-sheet")
             Spacer(modifier = Modifier.height(10.dp))
-            when (val state = briefingState) {
-                is AiState.Loading -> {
-                    Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                        ThinkingAnimation()
+            val showInsufficientData = !isDemo && (resourceState.beds.totalBeds == 0)
+            if (showInsufficientData) {
+                MediSlotCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Insufficient data for analysis",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
                     }
                 }
-                is AiState.Failure -> {
-                    AiErrorCard(
-                        errorText = state.error,
-                        onRetry = { viewModel.loadDailyBriefing("Morning/Afternoon Shift, ICU at 85% occupancy", "Staff shortage in pediatrics department, ED overload risk high") }
-                    )
-                }
-                is AiState.Success -> {
-                    val briefing = state.data
-                    MediSlotCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            if (state.isFallback) {
-                                val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
-                                        .padding(8.dp)
-                                ) {
-                                    Column {
-                                        Text("Previous AI Recommendation", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                        Text("Generated earlier on $formattedTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+            } else {
+                when (val state = briefingState) {
+                    is AiState.Loading -> {
+                        Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                            ThinkingAnimation()
+                        }
+                    }
+                    is AiState.Failure -> {
+                        val activeAlertsText = resourceState.alerts.filter { !it.isResolved && it.severity == "Critical" }.joinToString { it.title }.ifEmpty { "No critical alerts" }
+                        val metrics = "Beds occupancy: ${resourceState.beds.occupiedBeds}/${resourceState.beds.totalBeds}, ICU: ${icuResource.occupied}/${icuResource.total}, Oxygen cylinders: ${oxygenResource.availableCylinder}/${oxygenResource.totalCylinder}"
+                        val onRetryText = if (isDemo) "Morning/Afternoon Shift, ICU at 85% occupancy" else metrics
+                        val onRetryAlerts = if (isDemo) "Staff shortage in pediatrics department, ED overload risk high" else activeAlertsText
+                        AiErrorCard(
+                            errorText = state.error,
+                            onRetry = { viewModel.loadDailyBriefing(onRetryText, onRetryAlerts) }
+                        )
+                    }
+                    is AiState.Success -> {
+                        val briefing = state.data
+                        MediSlotCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                if (state.isFallback) {
+                                    val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
+                                            .padding(8.dp)
+                                    ) {
+                                        Column {
+                                            Text("Previous AI Recommendation", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                            Text("Generated earlier on $formattedTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        }
                                     }
+                                    Spacer(modifier = Modifier.height(10.dp))
                                 }
-                                Spacer(modifier = Modifier.height(10.dp))
-                            }
-                            if (state.isMock) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                                if (state.isMock) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Sample Recommendation",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.SmartToy, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Sample Recommendation",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                        text = "Current Shift Summary",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
-                                Spacer(modifier = Modifier.height(10.dp))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.SmartToy, null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Current Shift Summary",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(briefing.todaySummary, style = MaterialTheme.typography.bodyMedium)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(briefing.todaySummary, style = MaterialTheme.typography.bodyMedium)
 
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Busy Hours Pred:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                    Text(briefing.predictedBusyHours, style = MaterialTheme.typography.bodySmall)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Busy Hours Pred:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                        Text(briefing.predictedBusyHours, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Risk Severity:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF4444))
+                                        Text(briefing.criticalAlerts.firstOrNull() ?: "Low Risk", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                                    }
                                 }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Risk Severity:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF4444))
-                                    Text(briefing.criticalAlerts.firstOrNull() ?: "Low Risk", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
-                                }
-                            }
 
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("Operational Recommendations:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
-                            briefing.recommendations.forEach { recommendation ->
-                                Text("• $recommendation", style = MaterialTheme.typography.bodySmall)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text("Operational Recommendations:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                                briefing.recommendations.forEach { recommendation ->
+                                    Text("• $recommendation", style = MaterialTheme.typography.bodySmall)
+                                }
                             }
                         }
                     }
+                    else -> {}
                 }
-                else -> {}
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -315,30 +359,30 @@ fun HospitalDashboardScreen(
             ) {
                 KPICard(
                     icon = Icons.Default.Person,
-                    number = "24",
+                    number = if (isDemo) "24" else "0",
                     label = "Today's Admissions",
-                    trend = "+12%",
+                    trend = if (isDemo) "+12%" else "",
                     trendPositive = true
                 )
                 KPICard(
                     icon = Icons.AutoMirrored.Filled.Logout,
-                    number = "18",
+                    number = if (isDemo) "18" else "0",
                     label = "Today's Discharges",
-                    trend = "+5%",
+                    trend = if (isDemo) "+5%" else "",
                     trendPositive = true
                 )
                 KPICard(
                     icon = Icons.Default.Warning,
-                    number = "3",
+                    number = if (isDemo) "3" else "0",
                     label = "Emergency Cases",
-                    trend = "-2%",
+                    trend = if (isDemo) "-2%" else "",
                     trendPositive = false
                 )
                 KPICard(
                     icon = Icons.Default.MedicalServices,
-                    number = "14",
+                    number = if (isDemo) "14" else doctorsOnDutyCount.toString(),
                     label = "Doctors On Duty",
-                    trend = "Stable",
+                    trend = if (isDemo) "Stable" else "",
                     trendPositive = true
                 )
             }
@@ -372,6 +416,11 @@ fun HospitalDashboardScreen(
             // Hospital Load progress card
             SectionHeader(title = "Operational Load")
             Spacer(modifier = Modifier.height(12.dp))
+            val intakePct = if (isDemo) 82f else resourceAnalytics.bedOccupancyPercentage
+            val intakeStatus = if (isDemo) "Critical (82%)" else { "${intakePct.toInt()}%" }
+            val intakeProgress = if (isDemo) 0.82f else (intakePct / 100f)
+            val intakeColor = if (intakeProgress > 0.8f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+
             MediSlotCard(modifier = Modifier.fillMaxWidth()) {
                 Column {
                     Row(
@@ -384,16 +433,16 @@ fun HospitalDashboardScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Hospital Intake Level", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                         }
-                        StatusChip(status = "Critical (82%)")
+                        StatusChip(status = intakeStatus)
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     LinearProgressIndicator(
-                        progress = { 0.82f },
+                        progress = { intakeProgress },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp)
                             .clip(CircleShape),
-                        color = MaterialTheme.colorScheme.error,
+                        color = intakeColor,
                         trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
                     )
                 }
@@ -519,80 +568,96 @@ fun HospitalDashboardScreen(
             // AI Operational Insights Card
             SectionHeader(title = "AI Operational Insights", subtitle = "Machine-learning hospital load diagnostics")
             Spacer(modifier = Modifier.height(10.dp))
-            when (val state = insightsState) {
-                is AiState.Loading -> {
-                    Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                        ThinkingAnimation()
+            if (showInsufficientData) {
+                MediSlotCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Insufficient data for analysis",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
                     }
                 }
-                is AiState.Failure -> {
-                    AiErrorCard(
-                        errorText = state.error,
-                        onRetry = { viewModel.loadOperationalInsights("82", "148", "4", "10") }
-                    )
-                }
-                is AiState.Success -> {
-                    val insights = state.data
-                    MediSlotCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            if (state.isFallback) {
-                                val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
-                                        .padding(8.dp)
-                                ) {
-                                    Column {
-                                        Text("Previous AI Recommendation", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                        Text("Generated earlier on $formattedTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+            } else {
+                when (val state = insightsState) {
+                    is AiState.Loading -> {
+                        Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                            ThinkingAnimation()
+                        }
+                    }
+                    is AiState.Failure -> {
+                        AiErrorCard(
+                            errorText = state.error,
+                            onRetry = { viewModel.loadOperationalInsights("82", "148", "4", "10") }
+                        )
+                    }
+                    is AiState.Success -> {
+                        val insights = state.data
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                if (state.isFallback) {
+                                    val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
+                                            .padding(8.dp)
+                                    ) {
+                                        Column {
+                                            Text("Previous AI Recommendation", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                            Text("Generated earlier on $formattedTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        }
                                     }
+                                    Spacer(modifier = Modifier.height(10.dp))
                                 }
-                                Spacer(modifier = Modifier.height(10.dp))
-                            }
-                            if (state.isMock) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                                if (state.isMock) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Sample Recommendation",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.secondary)
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Sample Recommendation",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                        text = "EHR Load Analytics Insights",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.secondary)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "EHR Load Analytics Insights",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            
-                            Text("Bottlenecks Identified:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF4444))
-                            insights.bottlenecks.forEach { item ->
-                                Text("• $item", style = MaterialTheme.typography.bodySmall)
-                            }
-                            
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text("Summary Analysis (Priority: ${insights.priorityLevel}):", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                            Text(insights.summary, style = MaterialTheme.typography.bodySmall)
+                                
+                                Text("Bottlenecks Identified:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF4444))
+                                insights.bottlenecks.forEach { item ->
+                                    Text("• $item", style = MaterialTheme.typography.bodySmall)
+                                }
+                                
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text("Summary Analysis (Priority: ${insights.priorityLevel}):", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                Text(insights.summary, style = MaterialTheme.typography.bodySmall)
 
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text("Suggested Improvements:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
-                            insights.suggestedImprovements.forEach { item ->
-                                Text("• $item", style = MaterialTheme.typography.bodySmall)
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text("Suggested Improvements:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                                insights.suggestedImprovements.forEach { item ->
+                                    Text("• $item", style = MaterialTheme.typography.bodySmall)
+                                }
                             }
                         }
                     }
+                    else -> {}
                 }
-                else -> {}
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -604,17 +669,17 @@ fun HospitalDashboardScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Today's Admissions", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("24 patients", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(if (isDemo) "24 patients" else "0 patients", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     }
                     HorizontalDivider(color = Color(0xFF334155).copy(alpha = 0.15f))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Patients in Queue", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("30 waiting", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(if (isDemo) "30 waiting" else "0 waiting", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     }
                     HorizontalDivider(color = Color(0xFF334155).copy(alpha = 0.15f))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Registered Duty Staff", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("56 online staff", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(if (isDemo) "56 online staff" else "${staffMembers.count { it.status.equals("On Duty", ignoreCase = true) }} online staff", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -772,7 +837,28 @@ fun DoctorManagementScreen(onNavigateBack: () -> Unit) {
     var selectedDept by remember { mutableStateOf("All") }
     val departments = listOf("All", "Cardiology", "Neurology", "Orthopedics", "Pediatrics")
 
-    val filteredDoctors = MockData.doctors.filter { doc ->
+    val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+    val hospitalViewModel: com.medislot.app.viewmodel.HospitalViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val hospitalProfile by hospitalViewModel.hospitalProfile.collectAsState()
+    var realDoctors by remember { mutableStateOf<List<DoctorProfileData>>(emptyList()) }
+
+    LaunchedEffect(isDemo, hospitalProfile) {
+        if (!isDemo) {
+            try {
+                val list = com.medislot.app.network.RetrofitClient.apiService.getDoctorsList()
+                val hospName = hospitalProfile?.name ?: ""
+                realDoctors = list.filter {
+                    hospName.isNotEmpty() && it.hospital_name.equals(hospName, ignoreCase = true)
+                }.map { it.toDoctorProfileData() }
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
+    val doctorsSource = if (isDemo) MockData.doctors else realDoctors
+
+    val filteredDoctors = doctorsSource.filter { doc ->
         (selectedDept == "All" || doc.department == selectedDept) &&
                 doc.name.contains(searchQuery, ignoreCase = true)
     }
@@ -1719,14 +1805,23 @@ fun AnalyticsScreen(
     viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     hospitalViewModel: com.medislot.app.viewmodel.HospitalViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
-    val depts = MockData.departmentsUsage
+    val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+    val depts = if (isDemo) MockData.departmentsUsage else emptyList()
     val resourceState by hospitalViewModel.resourceState.collectAsState()
     val analyticsState by hospitalViewModel.resourceAnalytics.collectAsState()
     val briefingState by viewModel.dailyBriefingState.collectAsState()
     val aiStatus by viewModel.aiStatus.collectAsState()
 
-    LaunchedEffect(Unit) {
-        viewModel.loadDailyBriefing("Morning/Afternoon Shift, ICU at 85% occupancy", "Staff shortage in pediatrics department, ED overload risk high")
+    LaunchedEffect(resourceState, isDemo) {
+        if (isDemo) {
+            viewModel.loadDailyBriefing("Morning/Afternoon Shift, ICU at 85% occupancy", "Staff shortage in pediatrics department, ED overload risk high")
+        } else {
+            if (resourceState.beds.totalBeds > 0) {
+                val metrics = "Beds occupancy: ${resourceState.beds.occupiedBeds}/${resourceState.beds.totalBeds}, ICU: ${resourceState.icu.occupied}/${resourceState.icu.total}, Oxygen cylinders: ${resourceState.oxygen.availableCylinder}/${resourceState.oxygen.totalCylinder}"
+                val activeAlertsText = resourceState.alerts.filter { !it.isResolved && it.severity == "Critical" }.joinToString { it.title }.ifEmpty { "No critical alerts" }
+                viewModel.loadDailyBriefing(metrics, activeAlertsText)
+            }
+        }
     }
 
     Scaffold(
@@ -1752,18 +1847,38 @@ fun AnalyticsScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             // AI Executive Performance Report Card
-            when (val state = briefingState) {
-                is AiState.Loading -> {
-                    Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                        ThinkingAnimation()
+            val showInsufficientData = !isDemo && (resourceState.beds.totalBeds == 0)
+            if (showInsufficientData) {
+                MediSlotCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Insufficient data for analysis",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
                     }
                 }
-                is AiState.Failure -> {
-                    AiErrorCard(
-                        errorText = state.error,
-                        onRetry = { viewModel.loadDailyBriefing("Morning/Afternoon Shift, ICU at 85% occupancy", "Staff shortage in pediatrics department, ED overload risk high") }
-                    )
-                }
+            } else {
+                when (val state = briefingState) {
+                    is AiState.Loading -> {
+                        Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                            ThinkingAnimation()
+                        }
+                    }
+                    is AiState.Failure -> {
+                        val activeAlertsText = resourceState.alerts.filter { !it.isResolved && it.severity == "Critical" }.joinToString { it.title }.ifEmpty { "No critical alerts" }
+                        val metrics = "Beds occupancy: ${resourceState.beds.occupiedBeds}/${resourceState.beds.totalBeds}, ICU: ${resourceState.icu.occupied}/${resourceState.icu.total}, Oxygen cylinders: ${resourceState.oxygen.availableCylinder}/${resourceState.oxygen.totalCylinder}"
+                        val onRetryText = if (isDemo) "Morning/Afternoon Shift, ICU at 85% occupancy" else metrics
+                        val onRetryAlerts = if (isDemo) "Staff shortage in pediatrics department, ED overload risk high" else activeAlertsText
+                        AiErrorCard(
+                            errorText = state.error,
+                            onRetry = { viewModel.loadDailyBriefing(onRetryText, onRetryAlerts) }
+                        )
+                    }
                 is AiState.Success -> {
                     val report = state.data
                     MediSlotCard(
@@ -1814,11 +1929,12 @@ fun AnalyticsScreen(
                             }
                         }
                     }
-                }
+            }
                 else -> {}
             }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
             SectionHeader(title = "Key Operations Analytics")
             

@@ -30,9 +30,21 @@ data class PatientProfileRequest(
     val height: String,
     val weight: String,
     val bmi: String,
-    val allergies: String?,
-    val medications: String?,
-    val medical_history: String?
+    val allergies: String? = null,
+    val medications: String? = null,
+    val medical_history: String? = null,
+    val insurance_provider: String? = null,
+    val insurance_plan: String? = null,
+    val insurance_policy_number: String? = null,
+    val insurance_expiry: String? = null,
+    val emergency_contact_name: String? = null,
+    val emergency_contact_phone: String? = null,
+    val emergency_contact_relation: String? = null,
+    val vitals_heart_rate: Int? = null,
+    val vitals_bp: String? = null,
+    val vitals_spo2: Int? = null,
+    val vitals_temperature: Float? = null,
+    val vitals_blood_sugar: Int? = null
 )
 
 data class PatientProfileResponse(
@@ -45,9 +57,21 @@ data class PatientProfileResponse(
     val height: String,
     val weight: String,
     val bmi: String,
-    val allergies: String?,
-    val medications: String?,
-    val medical_history: String?
+    val allergies: String? = null,
+    val medications: String? = null,
+    val medical_history: String? = null,
+    val insurance_provider: String? = null,
+    val insurance_plan: String? = null,
+    val insurance_policy_number: String? = null,
+    val insurance_expiry: String? = null,
+    val emergency_contact_name: String? = null,
+    val emergency_contact_phone: String? = null,
+    val emergency_contact_relation: String? = null,
+    val vitals_heart_rate: Int? = null,
+    val vitals_bp: String? = null,
+    val vitals_spo2: Int? = null,
+    val vitals_temperature: Float? = null,
+    val vitals_blood_sugar: Int? = null
 )
 
 data class DoctorProfileRequest(
@@ -57,7 +81,8 @@ data class DoctorProfileRequest(
     val experience_years: Int,
     val contact: String,
     val mbbs_institution: String,
-    val registration_number: String
+    val registration_number: String,
+    val slot_times: String? = null
 )
 
 data class DoctorProfileResponse(
@@ -80,6 +105,28 @@ data class DoctorProfileResponse(
     val registration_number: String?
 )
 
+fun DoctorProfileResponse.toDoctorProfileData(): com.medislot.app.data.model.DoctorProfileData {
+    return com.medislot.app.data.model.DoctorProfileData(
+        id = id,
+        name = name,
+        department = specialization,
+        hospital = hospital_name,
+        rating = rating,
+        experience = if (experience_years > 0) "$experience_years Years" else "5 Years",
+        fees = if (fees.isNotBlank()) fees else "$100",
+        bio = bio ?: "Specialist at $hospital_name",
+        availability = if (availability.isNotBlank()) availability else "Monday - Friday",
+        slotTimes = slot_times?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOf("09:00 AM", "10:30 AM", "02:00 PM"),
+        email = contact,
+        contact = contact,
+        status = if (status.isNotBlank()) status else "On Duty",
+        room = if (room.isNotBlank()) room else "Room 2A",
+        shift = if (shift.isNotBlank()) shift else "Day Shift"
+    )
+}
+
 data class AppointmentRequest(
     val patient_id: String,
     val doctor_id: String,
@@ -100,8 +147,22 @@ data class AppointmentResponse(
     val date: String,
     val time: String,
     val status: String,
-    val queue_number: Int
+    val queue_number: Int,
+    val patient_name: String? = null
 )
+
+fun AppointmentResponse.toAppointmentData(): com.medislot.app.data.model.AppointmentData {
+    return com.medislot.app.data.model.AppointmentData(
+        id = id,
+        doctorName = doctor_name,
+        department = department,
+        hospital = hospital,
+        date = date,
+        time = time,
+        status = status,
+        queueNumber = queue_number
+    )
+}
 
 data class MedicalRecordRequest(
     val patient_id: String,
@@ -244,4 +305,19 @@ data class HospitalResponse(
     val status: String,
     val rejection_reason: String?,
     val docs_attached: String?
+)
+
+data class UserStatusResponse(
+    val status: String,
+    val rejection_reason: String?,
+    val hospital_name: String?
+)
+
+data class StaffMemberResponse(
+    val id: String,
+    val name: String,
+    val role: String,
+    val department: String,
+    val room: String,
+    val status: String
 )

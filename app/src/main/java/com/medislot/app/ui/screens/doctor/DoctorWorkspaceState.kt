@@ -152,6 +152,7 @@ object DoctorWorkspaceState {
         get() = SimpleDateFormat("EEE, MMM dd, yyyy", Locale.getDefault()).format(Date())
 
     var doctorProfile by mutableStateOf(DoctorProfileInfo())
+    val activeSlots = mutableStateListOf<String>()
 
     // Live Patient Queue
     val appointments = mutableStateListOf<PatientRecord>()
@@ -510,6 +511,13 @@ object DoctorWorkspaceState {
         currentLabOrders.clear()
         currentFollowUpDuration = "None"
         currentFollowUpNotes = ""
+
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            activeSlots.clear()
+            activeSlots.addAll(listOf("09:00 AM", "10:30 AM", "11:00 AM", "02:30 PM", "04:00 PM"))
+        } else {
+            activeSlots.clear()
+        }
     }
 
     // Recalculates waiting times of remaining patients

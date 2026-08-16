@@ -16,16 +16,34 @@ class PatientModel(Base):
     __tablename__ = "patients"
     id = Column(String, primary_key=True, index=True)
     uid = Column(String, ForeignKey("users.uid"), nullable=False)
-    age = Column(Integer, nullable=False)
-    gender = Column(String, nullable=False)
-    contact = Column(String, nullable=False)
-    blood_group = Column(String, nullable=False)
-    height = Column(String, nullable=False)
-    weight = Column(String, nullable=False)
-    bmi = Column(String, nullable=False)
+    age = Column(Integer, nullable=False, default=0)
+    gender = Column(String, nullable=False, default="")
+    contact = Column(String, nullable=False, default="")
+    blood_group = Column(String, nullable=False, default="")
+    height = Column(String, nullable=False, default="")
+    weight = Column(String, nullable=False, default="")
+    bmi = Column(String, nullable=False, default="")
     allergies = Column(Text, nullable=True) # comma separated
     medications = Column(Text, nullable=True) # comma separated
     medical_history = Column(Text, nullable=True) # comma separated
+
+    # Optional Insurance fields
+    insurance_provider = Column(String, nullable=True)
+    insurance_plan = Column(String, nullable=True)
+    insurance_policy_number = Column(String, nullable=True)
+    insurance_expiry = Column(String, nullable=True)
+
+    # Optional Emergency contact fields
+    emergency_contact_name = Column(String, nullable=True)
+    emergency_contact_phone = Column(String, nullable=True)
+    emergency_contact_relation = Column(String, nullable=True)
+
+    # Optional Vitals fields
+    vitals_heart_rate = Column(Integer, nullable=True)
+    vitals_bp = Column(String, nullable=True)
+    vitals_spo2 = Column(Integer, nullable=True)
+    vitals_temperature = Column(Float, nullable=True)
+    vitals_blood_sugar = Column(Integer, nullable=True)
 
 class DoctorModel(Base):
     __tablename__ = "doctors"
@@ -99,6 +117,7 @@ class MedicalRecordModel(Base):
 class StaffMemberModel(Base):
     __tablename__ = "staff_members"
     id = Column(String, primary_key=True, index=True)
+    hospital_name = Column(String, nullable=True)
     name = Column(String, nullable=False)
     role = Column(String, nullable=False) # Doctor, Nurse, Receptionist, Lab Technician, Pharmacist
     department = Column(String, nullable=False)
@@ -108,6 +127,7 @@ class StaffMemberModel(Base):
 class StaffScheduleModel(Base):
     __tablename__ = "staff_schedules"
     id = Column(String, primary_key=True, index=True)
+    hospital_name = Column(String, nullable=True)
     name = Column(String, nullable=False)
     role = Column(String, nullable=False)
     department = Column(String, nullable=False)
@@ -120,6 +140,7 @@ class StaffScheduleModel(Base):
 class LeaveRequestModel(Base):
     __tablename__ = "leave_requests"
     id = Column(String, primary_key=True, index=True)
+    hospital_name = Column(String, nullable=True)
     staff_id = Column(String, nullable=False)
     staff_name = Column(String, nullable=False)
     role = Column(String, nullable=False)
@@ -149,6 +170,7 @@ class DoctorApplicationModel(Base):
 class InventoryModel(Base):
     __tablename__ = "inventory"
     id = Column(String, primary_key=True, index=True)
+    hospital_name = Column(String, nullable=True)
     name = Column(String, nullable=False)
     total = Column(Integer, nullable=False)
     available = Column(Integer, nullable=False)
@@ -161,6 +183,7 @@ class InventoryModel(Base):
 class OperationalAlertModel(Base):
     __tablename__ = "operational_alerts"
     id = Column(String, primary_key=True, index=True)
+    hospital_name = Column(String, nullable=True)
     title = Column(String, nullable=False)
     message = Column(Text, nullable=False)
     severity = Column(String, nullable=False) # Critical, High, Medium, Low

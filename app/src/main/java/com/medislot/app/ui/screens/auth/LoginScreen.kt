@@ -131,14 +131,15 @@ fun LoginScreen(
             coroutineScope.launch {
                 isLoading = true
                 val repo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
-                val result = repo.login(usernameOrEmail, password)
+                val result = repo.login(usernameOrEmail.trim(), password)
                 isLoading = false
                 result.fold(
                     onSuccess = { response ->
                         onLoginSuccess(response.email)
                     },
-                    onFailure = {
-                        Toast.makeText(context, it.message ?: "Authentication failed", Toast.LENGTH_SHORT).show()
+                    onFailure = { err ->
+                        val errorMessage = com.medislot.app.utils.NetworkErrorUtils.getReadableErrorMessage(err)
+                        Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
                     }
                 )
             }

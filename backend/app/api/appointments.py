@@ -111,3 +111,19 @@ async def reschedule_appointment(apt_id: str, date: str, time: str, db: AsyncSes
     await db.commit()
     await db.refresh(appointment)
     return appointment
+
+@router.put("/{apt_id}/cancel", response_model=AppointmentResponse)
+async def cancel_appointment(apt_id: str, db: AsyncSession = Depends(get_db)):
+    query = select(AppointmentModel).where(AppointmentModel.id == apt_id)
+    result = await db.execute(query)
+    appointment = result.scalars().first()
+    if not appointment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Appointment not found"
+        )
+    appointment.status = "Cancelled"
+    await db.commit()
+    await db.refresh(appointment)
+    return appointment
+

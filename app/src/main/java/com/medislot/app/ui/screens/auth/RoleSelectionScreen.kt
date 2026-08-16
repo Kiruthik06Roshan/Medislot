@@ -50,6 +50,7 @@ import com.medislot.app.ui.theme.LocalDimens
 @Composable
 fun RoleSelectionScreen(
     onRoleSelected: (String) -> Unit,
+    onNavigateToPatientDemo: () -> Unit = {},
     onNavigateToDoctorDemo: () -> Unit = {},
     onNavigateToHospitalDemo: () -> Unit = {},
     onNavigateToSuperAdminDemo: () -> Unit = {}
@@ -164,22 +165,32 @@ fun RoleSelectionScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     MediSlotSecondaryButton(
+                        text = "Open Patient Demo",
+                        onClick = onNavigateToPatientDemo,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MediSlotSecondaryButton(
                         text = "Open Doctor Demo",
                         onClick = onNavigateToDoctorDemo,
                         modifier = Modifier.weight(1f)
                     )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     MediSlotSecondaryButton(
                         text = "Open Hospital Admin Demo",
                         onClick = onNavigateToHospitalDemo,
                         modifier = Modifier.weight(1f)
                     )
+                    MediSlotSecondaryButton(
+                        text = "Open Super Admin Demo",
+                        onClick = onNavigateToSuperAdminDemo,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-                Spacer(modifier = Modifier.height(10.dp))
-                MediSlotSecondaryButton(
-                    text = "Open Super Admin Demo",
-                    onClick = onNavigateToSuperAdminDemo,
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         }
     }

@@ -23,6 +23,9 @@ import com.medislot.app.data.model.VerificationStateStore
 import com.medislot.app.ui.components.MediSlotButton
 import com.medislot.app.ui.components.MediSlotCard
 import com.medislot.app.ui.components.MediSlotOutlinedButton
+import com.medislot.app.data.local.DatabaseProvider
+import com.medislot.app.network.RetrofitClient
+import kotlinx.coroutines.flow.first
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,29 +35,65 @@ fun VerificationStatusScreen(
     onNavigateToLogin: () -> Unit,
     onNavigateToDashboard: () -> Unit
 ) {
-    // Determine the name key to look up in our state store
-    val displayName = remember {
-        if (role == "doctor") {
-            // Find a mock doctor name or default to a demo doctor name
-            VerificationStateStore.doctorApplications.find { it.hospitalName == hospitalName }?.name ?: "Dr. Jane Smith"
+    val isDemoMode = DemoConfig.isDemoModeActive
+
+    // Determine the name key to look up in our state store (only for demo mode)
+    val displayName = remember(isDemoMode) {
+        if (isDemoMode) {
+            if (role == "doctor") {
+                // Find a mock doctor name or default to a demo doctor name
+                VerificationStateStore.doctorApplications.find { it.hospitalName == hospitalName }?.name ?: "Dr. Jane Smith"
+            } else {
+                if (hospitalName != "None" && hospitalName.isNotBlank()) hospitalName else "Demo Hospital"
+            }
         } else {
-            if (hospitalName != "None" && hospitalName.isNotBlank()) hospitalName else "Apollo Hospital"
+            ""
         }
     }
-
-    // Get live status from VerificationStateStore
-    val statusMap = VerificationStateStore.userVerificationStatus
-    val rejectionReasonsMap = VerificationStateStore.userRejectionReasons
     
-    // Fallback if not initialized in map
-    LaunchedEffect(displayName) {
-        if (statusMap[displayName] == null) {
-            statusMap[displayName] = VerificationStatus.PENDING
+    var realStatus by remember { mutableStateOf(VerificationStatus.PENDING) }
+    var realRejectionReason by remember { mutableStateOf<String?>(null) }
+    var realHospitalName by remember { mutableStateOf<String?>(null) }
+    var isLoadingRealStatus by remember { mutableStateOf(false) }
+
+    // Get live status from VerificationStateStore (only for demo mode)
+    val statusMap = if (isDemoMode) VerificationStateStore.userVerificationStatus else mutableMapOf<String, VerificationStatus>()
+    val rejectionReasonsMap = if (isDemoMode) VerificationStateStore.userRejectionReasons else mutableMapOf<String, String>()
+    
+    LaunchedEffect(displayName, isDemoMode) {
+        if (isDemoMode) {
+            if (statusMap[displayName] == null) {
+                statusMap[displayName] = VerificationStatus.PENDING
+            }
+        } else {
+            isLoadingRealStatus = true
+            try {
+                val uid = DatabaseProvider.getDataStoreManager().uidFlow.first()
+                if (uid != null) {
+                    val res = RetrofitClient.apiService.getUserStatus(uid)
+                    realStatus = when (res.status) {
+                        "Approved" -> VerificationStatus.APPROVED
+                        "Rejected" -> VerificationStatus.REJECTED
+                        "Waiting Documents" -> VerificationStatus.WAITING_FOR_DOCUMENTS
+                        else -> VerificationStatus.PENDING
+                    }
+                    realRejectionReason = res.rejection_reason
+                    realHospitalName = res.hospital_name
+                }
+            } catch (e: Exception) {
+                // Keep default pending status
+            } finally {
+                isLoadingRealStatus = false
+            }
         }
     }
 
-    val currentStatus = statusMap[displayName] ?: VerificationStatus.PENDING
-    val rejectionReason = rejectionReasonsMap[displayName] ?: "Verification documents could not be validated. Please ensure clear, readable copies of certificates are uploaded."
+    val currentStatus = if (isDemoMode) (statusMap[displayName] ?: VerificationStatus.PENDING) else realStatus
+    val rejectionReason = if (isDemoMode) {
+        rejectionReasonsMap[displayName] ?: "Verification documents could not be validated. Please ensure clear, readable copies of certificates are uploaded."
+    } else {
+        realRejectionReason ?: "Verification documents could not be validated. Please ensure clear, readable copies of certificates are uploaded."
+    }
 
     // Theme color corresponding to roles
     val themeColor = when (role) {
@@ -273,13 +312,18 @@ fun VerificationStatusScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
                     } else if (currentStatus == VerificationStatus.REJECTED || currentStatus == VerificationStatus.WAITING_FOR_DOCUMENTS) {
+                        val context = androidx.compose.ui.platform.LocalContext.current
                         MediSlotButton(
                             text = "Resubmit Documents",
                             onClick = {
-                                if (role == "doctor") {
-                                    VerificationStateStore.resubmitDoctor(displayName)
+                                if (isDemoMode) {
+                                    if (role == "doctor") {
+                                        VerificationStateStore.resubmitDoctor(displayName)
+                                    } else {
+                                        VerificationStateStore.resubmitHospital(displayName)
+                                    }
                                 } else {
-                                    VerificationStateStore.resubmitHospital(displayName)
+                                    android.widget.Toast.makeText(context, "Please re-register with updated documents.", android.widget.Toast.LENGTH_LONG).show()
                                 }
                             },
                             modifier = Modifier.weight(1f)
@@ -299,74 +343,76 @@ fun VerificationStatusScreen(
                 }
 
                 // REVIEWER SIMULATION DRAWER/PANEL (Visible in UI to showcase verification state shifts)
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                if (isDemoMode) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f))
                     ) {
-                        Text(
-                            text = "🛠️ Reviewer Demo Controls",
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Toggle account approval states to verify UI transition responsiveness.",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Button(
-                                onClick = { statusMap[displayName] = VerificationStatus.PENDING },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB74D)),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)
+                            Text(
+                                text = "🛠️ Reviewer Demo Controls",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Toggle account approval states to verify UI transition responsiveness.",
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text("Pending", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                            }
-                            Button(
-                                onClick = { statusMap[displayName] = VerificationStatus.APPROVED },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF81C784)),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)
-                            ) {
-                                Text("Approve", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                            }
-                            Button(
-                                onClick = {
-                                    statusMap[displayName] = VerificationStatus.REJECTED
-                                    rejectionReasonsMap[displayName] = if (role == "doctor") {
-                                        "MD/MS degree certificate is unreadable. Please upload a high-resolution PDF copy."
-                                    } else {
-                                        "Invalid License Number or registration records do not match registry."
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE57373)),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)
-                            ) {
-                                Text("Reject", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                            }
-                            Button(
-                                onClick = { statusMap[displayName] = VerificationStatus.WAITING_FOR_DOCUMENTS },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF64B5F6)),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)
-                            ) {
-                                Text("Req Docs", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                Button(
+                                    onClick = { statusMap[displayName] = VerificationStatus.PENDING },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB74D)),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)
+                                ) {
+                                    Text("Pending", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                                Button(
+                                    onClick = { statusMap[displayName] = VerificationStatus.APPROVED },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF81C784)),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)
+                                ) {
+                                    Text("Approve", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                                Button(
+                                    onClick = {
+                                        statusMap[displayName] = VerificationStatus.REJECTED
+                                        rejectionReasonsMap[displayName] = if (role == "doctor") {
+                                            "MD/MS degree certificate is unreadable. Please upload a high-resolution PDF copy."
+                                        } else {
+                                            "Invalid License Number or registration records do not match registry."
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE57373)),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)
+                                ) {
+                                    Text("Reject", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                                Button(
+                                    onClick = { statusMap[displayName] = VerificationStatus.WAITING_FOR_DOCUMENTS },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF64B5F6)),
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp)
+                                ) {
+                                    Text("Req Docs", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
                             }
                         }
                     }

@@ -1,5 +1,9 @@
 package com.medislot.app.ui.screens.patient
 
+import com.medislot.app.network.toDoctorProfileData
+import com.medislot.app.network.toAppointmentData
+import com.medislot.app.utils.NetworkErrorUtils
+
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -675,8 +679,12 @@ fun DoctorSearchScreen(
     // Sorting State
     var activeSort by remember { mutableStateOf("Highest Rated") }
 
+    // Real/Demo Doctors State
+    var rawDoctors by remember { mutableStateOf<List<com.medislot.app.data.model.DoctorProfileData>>(emptyList()) }
+    var networkErrorMessage by remember { mutableStateOf<String?>(null) }
+
     // Shimmer/Refresh states
-    var isShimmerLoading by remember { mutableStateOf(false) }
+    var isShimmerLoading by remember { mutableStateOf(true) }
     var isRefreshing by remember { mutableStateOf(false) }
     var pullDistance by remember { mutableStateOf(0f) }
     val scrollState = rememberScrollState()
@@ -689,25 +697,36 @@ fun DoctorSearchScreen(
     val experiences = listOf("All", "10+ Years", "15+ Years")
 
     LaunchedEffect(isRefreshing) {
-        if (isRefreshing) {
-            isShimmerLoading = true
-            delay(800)
-            isShimmerLoading = false
-            isRefreshing = false
-        }
+        isShimmerLoading = true
+        networkErrorMessage = null
+        val repo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+        val result = repo.getAllDoctors()
+        result.fold(
+            onSuccess = { list ->
+                rawDoctors = list.map { it.toDoctorProfileData() }
+                isShimmerLoading = false
+                isRefreshing = false
+            },
+            onFailure = { err ->
+                isShimmerLoading = false
+                isRefreshing = false
+                networkErrorMessage = com.medislot.app.utils.NetworkErrorUtils.getReadableErrorMessage(err)
+            }
+        )
     }
 
-    // Dynamic mock doctor filtering
+    // Dynamic doctor filtering
     val processedDoctors = remember(
-        searchQuery, selectedDistance, selectedRating, selectedFee, selectedExp, availableToday, activeSort, selectedDept
+        rawDoctors, searchQuery, selectedDistance, selectedRating, selectedFee, selectedExp, availableToday, activeSort, selectedDept
     ) {
-        var list = MockData.doctors.filter { doc ->
-            val matchesSearch = doc.name.contains(searchQuery, ignoreCase = true) ||
+        var list = rawDoctors.filter { doc ->
+            val matchesSearch = searchQuery.isBlank() ||
+                    doc.name.contains(searchQuery, ignoreCase = true) ||
                     doc.department.contains(searchQuery, ignoreCase = true) ||
                     doc.hospital.contains(searchQuery, ignoreCase = true)
             
             // Department filter
-            val matchesDept = selectedDept == "All" || doc.department.equals(selectedDept, ignoreCase = true)
+            val matchesDept = selectedDept == "All" || doc.department.equals(selectedDept, ignoreCase = true) || doc.department.contains(selectedDept, ignoreCase = true)
 
             // Experience matching
             val years = doc.experience.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 0
@@ -747,7 +766,7 @@ fun DoctorSearchScreen(
             }
 
             // Availability matching
-            val matchesAvailability = !availableToday || doc.availability.contains("Monday") || doc.availability.contains("Tuesday") || doc.availability.contains("Wednesday") || doc.availability.contains("Today")
+            val matchesAvailability = !availableToday || doc.availability.contains("Monday", ignoreCase = true) || doc.availability.contains("Today", ignoreCase = true) || doc.availability.contains("Everyday", ignoreCase = true)
 
             matchesSearch && matchesDept && matchesExp && matchesFee && matchesRating && matchesDist && matchesAvailability
         }
@@ -1142,7 +1161,20 @@ fun DoctorDetailsScreen(
     onBookAppointment: (String) -> Unit,
     onNavigateBack: () -> Unit
 ) {
-    val doctor = MockData.doctors.find { it.id == doctorId } ?: MockData.doctors[0]
+    var doctorState by remember { mutableStateOf<com.medislot.app.data.model.DoctorProfileData?>(null) }
+
+    LaunchedEffect(doctorId) {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            doctorState = MockData.doctors.find { it.id == doctorId } ?: MockData.doctors[0]
+        } else {
+            val repo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+            val res = repo.getAllDoctors()
+            val list = res.getOrNull() ?: emptyList()
+            val found = list.find { it.id == doctorId || it.uid == doctorId }?.toDoctorProfileData()
+            doctorState = found ?: list.firstOrNull()?.toDoctorProfileData() ?: MockData.doctors[0]
+        }
+    }
+    val doctor = doctorState ?: MockData.doctors[0]
     val context = LocalContext.current
     var selectedSlot by remember { mutableStateOf("") }
 
@@ -1393,9 +1425,25 @@ fun AppointmentBookingScreen(
 ) {
     val context = LocalContext.current
     
-    // Dynamic pre-fill check
     val isPreselected = doctorId != "any"
-    val preselectedDoctor = if (isPreselected) MockData.doctors.find { it.id == doctorId } else null
+    var preselectedDoctor by remember { mutableStateOf<com.medislot.app.data.model.DoctorProfileData?>(null) }
+    var allRealDoctors by remember { mutableStateOf<List<com.medislot.app.data.model.DoctorProfileData>>(emptyList()) }
+
+    LaunchedEffect(doctorId) {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            if (isPreselected) {
+                preselectedDoctor = MockData.doctors.find { doc -> doc.id == doctorId }
+            }
+        } else {
+            val repo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+            val res = repo.getAllDoctors()
+            val list = res.getOrNull()?.map { docResp -> docResp.toDoctorProfileData() } ?: emptyList()
+            allRealDoctors = list
+            if (isPreselected) {
+                preselectedDoctor = list.find { doc -> doc.id == doctorId } ?: list.firstOrNull()
+            }
+        }
+    }
 
     // Wizard step state: 1 to 7
     var currentStep by remember { mutableStateOf(if (isPreselected) 4 else 1) }
@@ -1503,8 +1551,17 @@ fun AppointmentBookingScreen(
                 3 -> {
                     SectionHeader(title = "Select Available Doctor")
                     Spacer(modifier = Modifier.height(12.dp))
-                    val availableDocs = MockData.doctors.filter { doc ->
-                        doc.hospital == selectedHospital && doc.department == selectedDept
+                    val availableDocs = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                        MockData.doctors.filter { doc ->
+                            (selectedHospital.isBlank() || doc.hospital == selectedHospital) &&
+                            (selectedDept.isBlank() || doc.department == selectedDept)
+                        }
+                    } else {
+                        val filtered = allRealDoctors.filter { doc ->
+                            (selectedHospital.isBlank() || doc.hospital.equals(selectedHospital, ignoreCase = true) || doc.hospital.contains(selectedHospital, ignoreCase = true)) &&
+                            (selectedDept.isBlank() || doc.department.equals(selectedDept, ignoreCase = true) || doc.department.contains(selectedDept, ignoreCase = true))
+                        }
+                        if (filtered.isEmpty()) allRealDoctors else filtered
                     }
                     if (availableDocs.isEmpty()) {
                         Text(text = "No doctors matching department $selectedDept at hospital $selectedHospital.")
@@ -1543,14 +1600,15 @@ fun AppointmentBookingScreen(
                 4 -> {
                     SectionHeader(title = "Choose Consultation Date")
                     Spacer(modifier = Modifier.height(12.dp))
-                    if (isPreselected && preselectedDoctor != null) {
+                    val currentPreselected = preselectedDoctor
+                    if (isPreselected && currentPreselected != null) {
                         MediSlotCard(modifier = Modifier.fillMaxWidth()) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.MedicalServices, null, tint = MaterialTheme.colorScheme.primary)
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
-                                    Text(text = preselectedDoctor.name, fontWeight = FontWeight.Bold)
-                                    Text(text = "${preselectedDoctor.department} • ${preselectedDoctor.hospital}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(text = currentPreselected.name, fontWeight = FontWeight.Bold)
+                                    Text(text = "${currentPreselected.department} • ${currentPreselected.hospital}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -2194,17 +2252,61 @@ fun AppointmentHistoryScreen(onNavigateBack: () -> Unit) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Upcoming", "Completed", "Cancelled")
     
-    // Refresh states
-    var isShimmerLoading by remember { mutableStateOf(false) }
+    // Refresh & data states
+    var isShimmerLoading by remember { mutableStateOf(true) }
     var isRefreshing by remember { mutableStateOf(false) }
     var pullDistance by remember { mutableStateOf(0f) }
     val scrollState = rememberScrollState()
 
-    // Dialog state variables
     var activePrescriptionToView by remember { mutableStateOf<String?>(null) }
-    var appointmentList by remember { mutableStateOf(MockData.appointments.toList()) }
+    var appointmentList by remember { mutableStateOf<List<com.medislot.app.data.model.AppointmentData>>(emptyList()) }
     var appointmentToReschedule by remember { mutableStateOf<com.medislot.app.data.model.AppointmentData?>(null) }
     var appointmentToCancel by remember { mutableStateOf<com.medislot.app.data.model.AppointmentData?>(null) }
+    var historyErrorMessage by remember { mutableStateOf<String?>(null) }
+
+    val fetchAppointments: suspend () -> Unit = {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            appointmentList = MockData.appointments.toList()
+            historyErrorMessage = null
+            isShimmerLoading = false
+        } else {
+            isShimmerLoading = true
+            historyErrorMessage = null
+            try {
+                val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                val patientRepo = com.medislot.app.data.repository.PatientRepositoryImpl()
+                val patientUid = authRepo.getUid() ?: ""
+                val res = patientRepo.getAppointments(patientUid)
+                res.fold(
+                    onSuccess = { list ->
+                        appointmentList = list.map { resp ->
+                            com.medislot.app.data.model.AppointmentData(
+                                id = resp.id,
+                                doctorName = resp.doctor_name,
+                                department = resp.department,
+                                hospital = resp.hospital,
+                                date = resp.date,
+                                time = resp.time,
+                                status = resp.status,
+                                queueNumber = resp.queue_number
+                            )
+                        }
+                    },
+                    onFailure = { e ->
+                        historyErrorMessage = NetworkErrorUtils.getReadableErrorMessage(e)
+                    }
+                )
+            } catch (e: Exception) {
+                historyErrorMessage = NetworkErrorUtils.getReadableErrorMessage(e)
+            } finally {
+                isShimmerLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        fetchAppointments()
+    }
 
     @OptIn(ExperimentalMaterial3Api::class)
     if (appointmentToReschedule != null) {
@@ -2308,14 +2410,7 @@ fun AppointmentHistoryScreen(onNavigateBack: () -> Unit) {
                                 val result = repo.rescheduleAppointment(appt.id, selectedDate, selectedTime)
                                 result.fold(
                                     onSuccess = {
-                                        val index = MockData.appointments.indexOfFirst { it.id == appt.id }
-                                        if (index != -1) {
-                                            MockData.appointments[index] = MockData.appointments[index].copy(
-                                                date = selectedDate,
-                                                time = selectedTime
-                                            )
-                                        }
-                                        appointmentList = MockData.appointments.toList()
+                                        fetchAppointments()
                                         Toast.makeText(context, "Appointment rescheduled successfully", Toast.LENGTH_SHORT).show()
                                         appointmentToReschedule = null
                                     },
@@ -2364,11 +2459,7 @@ fun AppointmentHistoryScreen(onNavigateBack: () -> Unit) {
                                 val result = repo.cancelAppointment(appt.id)
                                 result.fold(
                                     onSuccess = {
-                                        val index = MockData.appointments.indexOfFirst { it.id == appt.id }
-                                        if (index != -1) {
-                                            MockData.appointments[index] = MockData.appointments[index].copy(status = "Cancelled")
-                                        }
-                                        appointmentList = MockData.appointments.toList()
+                                        fetchAppointments()
                                         Toast.makeText(context, "Consultation cancelled successfully", Toast.LENGTH_SHORT).show()
                                         appointmentToCancel = null
                                     },
@@ -2650,13 +2741,13 @@ fun MedicalRecordsScreen(
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(0) }
     
-    // Shimmer/Refresh states
-    var isShimmerLoading by remember { mutableStateOf(false) }
+    var realMedicalRecords by remember { mutableStateOf<List<com.medislot.app.network.MedicalRecordResponse>>(emptyList()) }
+    var isShimmerLoading by remember { mutableStateOf(true) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var recordsError by remember { mutableStateOf<String?>(null) }
     var pullDistance by remember { mutableStateOf(0f) }
     val scrollState = rememberScrollState()
 
-    // Dialog trigger states
     var activeReportForAi by remember { mutableStateOf<com.medislot.app.data.model.LabReport?>(null) }
     var activeMedicationForAi by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -2665,13 +2756,32 @@ fun MedicalRecordsScreen(
     val reportState by viewModel.reportExplanationState.collectAsState()
     val prescriptionState by viewModel.prescriptionExplanationState.collectAsState()
 
-    LaunchedEffect(isRefreshing) {
-        if (isRefreshing) {
-            isShimmerLoading = true
-            delay(800)
+    val fetchRecords: suspend () -> Unit = {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
             isShimmerLoading = false
-            isRefreshing = false
+            recordsError = null
+        } else {
+            isShimmerLoading = true
+            recordsError = null
+            try {
+                val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                val patientRepo = com.medislot.app.data.repository.PatientRepositoryImpl()
+                val patientUid = authRepo.getUid() ?: ""
+                val res = patientRepo.getMedicalRecords(patientUid)
+                res.fold(
+                    onSuccess = { list -> realMedicalRecords = list },
+                    onFailure = { e -> recordsError = NetworkErrorUtils.getReadableErrorMessage(e) }
+                )
+            } catch (e: Exception) {
+                recordsError = NetworkErrorUtils.getReadableErrorMessage(e)
+            } finally {
+                isShimmerLoading = false
+            }
         }
+    }
+
+    LaunchedEffect(Unit) {
+        fetchRecords()
     }
 
     Scaffold(
@@ -2733,56 +2843,176 @@ fun MedicalRecordsScreen(
                         ShimmerPlaceholder(modifier = Modifier.fillMaxWidth().height(100.dp))
                     }
                 } else if (selectedTab == 0) {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(MockData.patientProfile.labReports) { report ->
-                            MediSlotCard(modifier = Modifier.fillMaxWidth().clickScale { }) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(text = report.testName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                        Text(text = "Date: ${report.date} | Result: ${report.result}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val reportsList = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                        MockData.patientProfile.labReports
+                    } else {
+                        realMedicalRecords.filter { it.record_type != "Prescription" }.map { rec ->
+                            com.medislot.app.data.model.LabReport(
+                                testName = rec.title,
+                                date = rec.date,
+                                result = rec.result_summary ?: "Normal",
+                                status = "Completed"
+                            )
+                        }
+                    }
+
+                    if (reportsList.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            EmptyStateView(
+                                icon = Icons.Default.Science,
+                                title = "No health records available",
+                                description = "Your diagnostic reports and lab results will appear here."
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(bottom = 24.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            items(reportsList) { report ->
+                                MediSlotCard(modifier = Modifier.fillMaxWidth().clickScale { }) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(text = report.testName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text(text = "Date: ${report.date} | Result: ${report.result}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            StatusChip(status = report.status)
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        activeReportForAi = report
+                                                        viewModel.explainReport(report.testName + " with result: " + report.result)
+                                                    },
+                                                    modifier = Modifier.height(34.dp),
+                                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Info,
+                                                        contentDescription = "AI Explain",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "AI Explain",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        downloadAndOpenReportPdf(context, report.testName, report.date, report.result, report.status) { file ->
+                                                            scope.launch {
+                                                                val snackResult = snackbarHostState.showSnackbar(
+                                                                    message = "PDF downloaded successfully",
+                                                                    actionLabel = "Open PDF",
+                                                                    duration = SnackbarDuration.Short
+                                                                )
+                                                                if (snackResult == SnackbarResult.ActionPerformed) {
+                                                                    openDownloadedPdf(context, file)
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    modifier = Modifier.height(34.dp),
+                                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Upload,
+                                                        contentDescription = "Download",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "Download",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
-                                    Column(horizontalAlignment = Alignment.End) {
-                                        StatusChip(status = report.status)
-                                        Spacer(modifier = Modifier.height(8.dp))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val medsList = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                        MockData.patientProfile.medications
+                    } else {
+                        realMedicalRecords.filter { it.record_type == "Prescription" }.map { it.title }
+                    }
+
+                    if (medsList.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            EmptyStateView(
+                                icon = Icons.Default.Medication,
+                                title = "No active prescriptions",
+                                description = "Your doctor prescriptions will appear here after consultations."
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(bottom = 24.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            items(medsList) { med ->
+                                MediSlotCard(modifier = Modifier.fillMaxWidth().clickScale { }) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(Icons.Default.Assignment, null, tint = MaterialTheme.colorScheme.secondary)
+                                            }
+                                            Spacer(modifier = Modifier.width(16.dp))
+                                            Column {
+                                                Text(text = med, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                                Text(text = "Status: Ongoing • Prescribed by Specialist", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
                                         
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            // AI Explain button
                                             OutlinedButton(
                                                 onClick = {
-                                                    activeReportForAi = report
-                                                    viewModel.explainReport(report.testName + " with result: " + report.result)
+                                                    activeMedicationForAi = med
+                                                    viewModel.explainPrescription(med)
                                                 },
                                                 modifier = Modifier.height(34.dp),
-                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
+                                                contentPadding = PaddingValues(horizontal = 8.dp)
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Info,
-                                                    contentDescription = "AI Explain",
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = "AI Explain",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    fontWeight = FontWeight.Bold
-                                                )
+                                                Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("AI Explain", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                                             }
 
-                                            // Redesigned Outlined Download Button (Requirement 7)
                                             OutlinedButton(
                                                 onClick = {
-                                                    downloadAndOpenReportPdf(context, report.testName, report.date, report.result, report.status) { file ->
+                                                    downloadAndOpenReportPdf(context, "Prescription receipt", "Today", med, "Active") { file ->
                                                         scope.launch {
                                                             val snackResult = snackbarHostState.showSnackbar(
                                                                 message = "PDF downloaded successfully",
@@ -2796,98 +3026,13 @@ fun MedicalRecordsScreen(
                                                     }
                                                 },
                                                 modifier = Modifier.height(34.dp),
-                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
+                                                contentPadding = PaddingValues(horizontal = 8.dp)
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Upload,
-                                                    contentDescription = "Download",
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = "Download",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    fontWeight = FontWeight.Bold
-                                                )
+                                                Icon(Icons.Default.Upload, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                                             }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(MockData.patientProfile.medications) { med ->
-                            MediSlotCard(modifier = Modifier.fillMaxWidth().clickScale { }) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.Assignment, null, tint = MaterialTheme.colorScheme.secondary)
-                                        }
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Column {
-                                            Text(text = med, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                            Text(text = "Status: Ongoing • Prescribed by Specialist", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                    
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        // AI Explain button
-                                        OutlinedButton(
-                                            onClick = {
-                                                activeMedicationForAi = med
-                                                viewModel.explainPrescription(med)
-                                            },
-                                            modifier = Modifier.height(34.dp),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
-                                            contentPadding = PaddingValues(horizontal = 8.dp)
-                                        ) {
-                                            Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("AI Explain", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-                                        }
-
-                                        // Download Outlined Button
-                                        OutlinedButton(
-                                            onClick = {
-                                                downloadAndOpenReportPdf(context, "Prescription receipt", "Today", med, "Active") { file ->
-                                                    scope.launch {
-                                                        val snackResult = snackbarHostState.showSnackbar(
-                                                            message = "PDF downloaded successfully",
-                                                            actionLabel = "Open PDF",
-                                                            duration = SnackbarDuration.Short
-                                                        )
-                                                        if (snackResult == SnackbarResult.ActionPerformed) {
-                                                            openDownloadedPdf(context, file)
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.height(34.dp),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
-                                            contentPadding = PaddingValues(horizontal = 8.dp)
-                                        ) {
-                                            Icon(Icons.Default.Upload, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("PDF", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                                         }
                                     }
                                 }
@@ -2965,9 +3110,10 @@ fun MedicalRecordsScreen(
                             )
                         }
                         is AiState.Success -> {
-                            val data = state.data
-                            if (state.isFallback) {
-                                val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
+                            val successState = state as AiState.Success<com.medislot.app.data.ai.ReportExplanationResponse>
+                            val data = successState.data
+                            if (successState.isFallback) {
+                                val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(successState.timestamp))
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -2982,7 +3128,7 @@ fun MedicalRecordsScreen(
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
                             }
-                            if (state.isMock) {
+                            if (successState.isMock) {
                                 Text(
                                     text = "* Sample Recommendation",
                                     style = MaterialTheme.typography.labelSmall,
@@ -3065,9 +3211,10 @@ fun MedicalRecordsScreen(
                             )
                         }
                         is AiState.Success -> {
-                            val data = state.data
-                            if (state.isFallback) {
-                                val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(state.timestamp))
+                            val successState = state as AiState.Success<com.medislot.app.data.ai.PrescriptionExplanationResponse>
+                            val data = successState.data
+                            if (successState.isFallback) {
+                                val formattedTime = java.text.SimpleDateFormat("MMM dd, yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(successState.timestamp))
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -3082,7 +3229,7 @@ fun MedicalRecordsScreen(
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
                             }
-                            if (state.isMock) {
+                            if (successState.isMock) {
                                 Text(
                                     text = "* Sample Recommendation",
                                     style = MaterialTheme.typography.labelSmall,
@@ -3319,7 +3466,24 @@ fun PatientProfileScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var selectedTab by remember { mutableStateOf(0) }
+    
+    // Real Profile States
+    var realPatientProfile by remember { mutableStateOf<com.medislot.app.network.PatientProfileResponse?>(null) }
+    var realDoctorProfile by remember { mutableStateOf<com.medislot.app.network.DoctorProfileResponse?>(null) }
+    var realHospitalProfile by remember { mutableStateOf<com.medislot.app.network.HospitalResponse?>(null) }
+    var userEmail by remember { mutableStateOf("") }
+    
+    // Edit Dialog States
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editContact by remember { mutableStateOf("") }
+    var editAge by remember { mutableStateOf("") }
+    var editBloodGroup by remember { mutableStateOf("") }
+    var editHeight by remember { mutableStateOf("") }
+    var editWeight by remember { mutableStateOf("") }
+    var editAllergies by remember { mutableStateOf("") }
+    var isSavingProfile by remember { mutableStateOf(false) }
     
     // Shimmer/Refresh states
     var isShimmerLoading by remember { mutableStateOf(false) }
@@ -3327,14 +3491,51 @@ fun PatientProfileScreen(
     var pullDistance by remember { mutableStateOf(0f) }
     val scrollState = rememberScrollState()
 
+    val loadRealProfile: suspend () -> Unit = {
+        if (!com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+            val uid = authRepo.getUid()
+            userEmail = authRepo.getEmail() ?: ""
+            if (uid != null) {
+                when (role) {
+                    UserRole.PATIENT -> {
+                        val patRepo = com.medislot.app.data.repository.PatientRepositoryImpl()
+                        val res = patRepo.getProfile(uid)
+                        res.fold(onSuccess = { realPatientProfile = it }, onFailure = { })
+                    }
+                    UserRole.DOCTOR -> {
+                        val docRepo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+                        val res = docRepo.getProfile(uid)
+                        res.fold(onSuccess = { realDoctorProfile = it }, onFailure = { })
+                    }
+                    UserRole.HOSPITAL -> {
+                        try {
+                            val response = com.medislot.app.network.RetrofitClient.apiService.getHospitalProfile(uid)
+                            realHospitalProfile = response
+                        } catch (e: Exception) { }
+                    }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadRealProfile()
+    }
+
     LaunchedEffect(isRefreshing) {
         if (isRefreshing) {
             isShimmerLoading = true
-            delay(800)
+            loadRealProfile()
+            delay(500)
             isShimmerLoading = false
             isRefreshing = false
         }
     }
+
+    val displayPatientName = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) MockData.patientProfile.name else (if (userEmail.contains("@")) userEmail.substringBefore("@").replace(".", " ").capitalize(Locale.getDefault()) else "Real Patient")
+    val displayDoctorName = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) MockData.doctors[0].name else (realDoctorProfile?.name ?: "Dr. Real Doctor")
+    val displayHospitalName = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "City General Hospital" else (realHospitalProfile?.name ?: "Real Hospital")
 
     Scaffold(
         topBar = {
@@ -3414,9 +3615,9 @@ fun PatientProfileScreen(
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
                                 text = when (role) {
-                                    UserRole.PATIENT -> MockData.patientProfile.name
-                                    UserRole.DOCTOR -> MockData.doctors[0].name
-                                    UserRole.HOSPITAL -> "City General Hospital"
+                                    UserRole.PATIENT -> displayPatientName
+                                    UserRole.DOCTOR -> displayDoctorName
+                                    UserRole.HOSPITAL -> displayHospitalName
                                 },
                                 style = MaterialTheme.typography.headlineLarge,
                                 fontWeight = FontWeight.Bold
@@ -3424,9 +3625,9 @@ fun PatientProfileScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             
                             val memberId = when (role) {
-                                UserRole.PATIENT -> "#PAT-8812"
-                                UserRole.DOCTOR -> "#DOC-1123"
-                                UserRole.HOSPITAL -> "#HOS-0044"
+                                UserRole.PATIENT -> if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "#PAT-8812" else "#PAT-${(realPatientProfile?.id ?: "REAL").takeLast(6)}"
+                                UserRole.DOCTOR -> if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "#DOC-1123" else "#DOC-${(realDoctorProfile?.id ?: "REAL").takeLast(6)}"
+                                UserRole.HOSPITAL -> if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "#HOS-0044" else "#HOS-${(realHospitalProfile?.id ?: "REAL").takeLast(6)}"
                             }
                             Box(
                                 modifier = Modifier
@@ -3469,8 +3670,15 @@ fun PatientProfileScreen(
 
                         when (selectedTab) {
                             0 -> {
-                                // Medical ID Card widget (Replacement of QR - Requirement 4)
                                 SectionHeader(title = "Health Medical ID")
+                                val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+                                val bloodGroupStr = if (isDemo) MockData.patientProfile.bloodGroup else (realPatientProfile?.blood_group?.ifBlank { "--" } ?: "--")
+                                val bmiStr = if (isDemo) MockData.patientProfile.bmi else (realPatientProfile?.bmi?.ifBlank { "--" } ?: "--")
+                                val ageGenderStr = if (isDemo) "29 Years • Female" else if ((realPatientProfile?.age ?: 0) > 0) "${realPatientProfile?.age} Years • ${realPatientProfile?.gender}" else "--"
+                                val allergiesStr = if (isDemo) MockData.patientProfile.allergies.joinToString(", ") else (realPatientProfile?.allergies?.ifBlank { "None reported" } ?: "None reported")
+                                val heightStr = if (isDemo) MockData.patientProfile.height else (realPatientProfile?.height?.ifBlank { "--" } ?: "--")
+                                val weightStr = if (isDemo) MockData.patientProfile.weight else (realPatientProfile?.weight?.ifBlank { "--" } ?: "--")
+
                                 MediSlotCard(modifier = Modifier.fillMaxWidth().clickScale { }) {
                                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                         Row(
@@ -3479,25 +3687,25 @@ fun PatientProfileScreen(
                                         ) {
                                             Column {
                                                 Text("BLOOD GROUP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                                Text(MockData.patientProfile.bloodGroup, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                                Text(bloodGroupStr, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                             }
                                             Column(horizontalAlignment = Alignment.End) {
                                                 Text("BMI INDEX", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                                Text(MockData.patientProfile.bmi, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                                Text(bmiStr, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                         HorizontalDivider(color = Color(0xFF334155).copy(alpha = 0.3f))
                                         
                                         Column {
-                                            Text("CHRONIC CONDITIONS & HISTORY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-                                            Text(MockData.patientProfile.history.joinToString("\n"), style = MaterialTheme.typography.bodyMedium)
+                                            Text("AGE & GENDER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                                            Text(ageGenderStr, style = MaterialTheme.typography.bodyMedium)
                                         }
                                         
                                         HorizontalDivider(color = Color(0xFF334155).copy(alpha = 0.3f))
                                         
                                         Column {
                                             Text("KNOWN ALLERGIES", style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
-                                            Text(MockData.patientProfile.allergies.joinToString(", "), style = MaterialTheme.typography.bodyMedium)
+                                            Text(allergiesStr, style = MaterialTheme.typography.bodyMedium)
                                         }
                                         
                                         HorizontalDivider(color = Color(0xFF334155).copy(alpha = 0.3f))
@@ -3508,60 +3716,125 @@ fun PatientProfileScreen(
                                         ) {
                                             Column {
                                                 Text("HEIGHT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                Text(MockData.patientProfile.height, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                                Text(heightStr, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                                             }
                                             Column(horizontalAlignment = Alignment.End) {
                                                 Text("WEIGHT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                Text(MockData.patientProfile.weight, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                                Text(weightStr, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
                                 }
                             }
                             1 -> {
-                                // Redesigned Metrolife Insurance card (Requirement 3)
                                 SectionHeader(title = "Health Insurance Card")
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(200.dp)
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .background(
-                                            Brush.linearGradient(colors = listOf(Color(0xFF3B82F6), Color(0xFF06B6D4)))
-                                        )
-                                        .padding(20.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.fillMaxSize(),
-                                        verticalArrangement = Arrangement.SpaceBetween
+                                val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+                                val hasInsurance = if (isDemo) true else !realPatientProfile?.insurance_provider.isNullOrBlank()
+
+                                if (!hasInsurance) {
+                                    MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.HealthAndSafety,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                modifier = Modifier.size(48.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Text(
+                                                text = "No Insurance Provided",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "Insurance card and policy details have not been added to this profile.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    val provider = if (isDemo) "METROLIFE INSURE" else (realPatientProfile?.insurance_provider ?: "Health Insurance")
+                                    val plan = if (isDemo) "Premium Health Plan" else (realPatientProfile?.insurance_plan ?: "Standard Plan")
+                                    val policyNo = if (isDemo) "#POL-8902123" else (realPatientProfile?.insurance_policy_number ?: "#POL-UNKNOWN")
+                                    val expiry = if (isDemo) "Exp 12/2028" else (realPatientProfile?.insurance_expiry ?: "Active")
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(200.dp)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(
+                                                Brush.linearGradient(colors = listOf(Color(0xFF3B82F6), Color(0xFF06B6D4)))
+                                            )
+                                            .padding(20.dp)
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.Top
+                                        Column(
+                                            modifier = Modifier.fillMaxSize(),
+                                            verticalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Row(
-                                                modifier = Modifier.weight(1f),
-                                                verticalAlignment = Alignment.CenterVertically
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.Top
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.HealthAndSafety,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
+                                                Row(
+                                                    modifier = Modifier.weight(1f),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.HealthAndSafety,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = provider,
+                                                            color = Color.White.copy(alpha = 0.8f),
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Text(
+                                                            text = plan,
+                                                            color = Color.White,
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
                                                 Spacer(modifier = Modifier.width(8.dp))
+                                                Column(horizontalAlignment = Alignment.End) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(Color.White.copy(alpha = 0.2f))
+                                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("ACTIVE", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                            
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.Bottom
+                                            ) {
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(
-                                                        text = "METROLIFE INSURE",
-                                                        color = Color.White.copy(alpha = 0.8f),
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        fontWeight = FontWeight.Bold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Text(
-                                                        text = "Premium Health Plan",
+                                                        text = displayPatientName.uppercase(),
                                                         color = Color.White,
                                                         style = MaterialTheme.typography.titleMedium,
                                                         fontWeight = FontWeight.Bold,
@@ -3569,84 +3842,74 @@ fun PatientProfileScreen(
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                 }
-                                            }
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Column(horizontalAlignment = Alignment.End) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(Color.White.copy(alpha = 0.2f))
-                                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text("VIP GOLD", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column(horizontalAlignment = Alignment.End) {
+                                                    Text("Policy: $policyNo", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text("Valid: $expiry", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 }
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF22C55E)))
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("ACTIVE", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                                }
-                                            }
-                                        }
-                                        
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.Bottom
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = MockData.patientProfile.name.uppercase(),
-                                                    color = Color.White,
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(
-                                                    text = "Worldwide Premium Care",
-                                                    color = Color.White.copy(alpha = 0.9f),
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Column(horizontalAlignment = Alignment.End) {
-                                                Text("Policy: #POL-8902123", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text("Member Since: 2020", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text("Valid: Exp 12/2028", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
                                     }
                                 }
                             }
                             2 -> {
-                                // Emergency contact details
                                 SectionHeader(title = "Primary Emergency Contacts")
-                                MediSlotCard(modifier = Modifier.fillMaxWidth()) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+                                val contactPhone = if (isDemo) "+1 (555) 902-1823" else (realPatientProfile?.emergency_contact_phone?.ifBlank { null } ?: realPatientProfile?.contact?.ifBlank { null })
+
+                                if (contactPhone == null) {
+                                    MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Box(
-                                                    modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFEF4444).copy(alpha = 0.1f)),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(Icons.Default.Phone, null, tint = Color(0xFFEF4444), modifier = Modifier.size(18.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.Phone,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                modifier = Modifier.size(48.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Text(
+                                                text = "No Emergency Contact",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "No primary emergency contact number registered.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    val contactName = if (isDemo) "Primary Contact" else (realPatientProfile?.emergency_contact_name ?: "Primary Contact")
+                                    MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(
+                                                        modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFEF4444).copy(alpha = 0.1f)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(Icons.Default.Phone, null, tint = Color(0xFFEF4444), modifier = Modifier.size(18.dp))
+                                                    }
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Column {
+                                                        Text(text = contactName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                                        Text(text = contactPhone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    }
                                                 }
-                                                Spacer(modifier = Modifier.width(12.dp))
-                                                Column {
-                                                    Text(text = "Richard Connor (Spouse)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                                    Text(text = "+1 (555) 902-1823", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                IconButton(onClick = { Toast.makeText(context, "Calling $contactName...", Toast.LENGTH_SHORT).show() }) {
+                                                    Icon(Icons.Default.Call, null, tint = Color(0xFFEF4444))
                                                 }
-                                            }
-                                            IconButton(onClick = { Toast.makeText(context, "CallingRichard...", Toast.LENGTH_SHORT).show() }) {
-                                                Icon(Icons.Default.Call, null, tint = Color(0xFFEF4444))
                                             }
                                         }
                                     }
@@ -3662,25 +3925,25 @@ fun PatientProfileScreen(
                                 ProfileInfoRow(
                                     icon = Icons.Default.Person,
                                     label = "Administrator Name",
-                                    value = "Dr. Arthur Pendelton"
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "Dr. Arthur Pendelton" else (realHospitalProfile?.admin_name?.takeIf { it.isNotBlank() } ?: "Not configured")
                                 )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ProfileInfoRow(
                                     icon = Icons.Default.LocalHospital,
                                     label = "Hospital Type",
-                                    value = "Multi-Specialty Enterprise Hospital"
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "Multi-Specialty Enterprise Hospital" else (realHospitalProfile?.hospital_type?.takeIf { it.isNotBlank() } ?: "Not configured")
                                 )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ProfileInfoRow(
                                     icon = Icons.Default.Info,
                                     label = "License Number",
-                                    value = "HOS-LIC-99824A"
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "HOS-LIC-99824A" else (realHospitalProfile?.license_number?.takeIf { it.isNotBlank() } ?: "Not configured")
                                 )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ProfileInfoRow(
                                     icon = Icons.Default.CalendarMonth,
-                                    label = "Established Year",
-                                    value = "1994"
+                                    label = "Registration Number",
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "REG-11029" else (realHospitalProfile?.registration_number?.takeIf { it.isNotBlank() } ?: "Not configured")
                                 )
                             }
                         }
@@ -3691,19 +3954,19 @@ fun PatientProfileScreen(
                                 ProfileInfoRow(
                                     icon = Icons.Default.Bed,
                                     label = "Hospital Capacity",
-                                    value = "500 Beds (Active)"
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "150 Beds (Active)" else "Not configured"
                                 )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ProfileInfoRow(
                                     icon = Icons.Default.People,
-                                    label = "Departments Count",
-                                    value = "14 Specialties & Departments"
+                                    label = "Departments",
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "14 Specialties & Departments" else (realHospitalProfile?.departments?.takeIf { it.isNotBlank() } ?: "Not configured")
                                 )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ProfileInfoRow(
                                     icon = Icons.Default.Emergency,
                                     label = "Emergency Contact Desk",
-                                    value = "+1 (555) 911-3000"
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "+1 (555) 911-3000" else (realHospitalProfile?.contact?.takeIf { it.isNotBlank() } ?: "Not configured")
                                 )
                             }
                         }
@@ -3714,26 +3977,19 @@ fun PatientProfileScreen(
                                 ProfileInfoRow(
                                     icon = Icons.Default.LocationOn,
                                     label = "Hospital Address",
-                                    value = "100 Medical Plaza, Wing A, Metro City"
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "100 Medical Plaza, Wing A, Metro City" else (realHospitalProfile?.address?.takeIf { it.isNotBlank() } ?: "Not configured")
                                 )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ProfileInfoRow(
                                     icon = Icons.Default.Email,
-                                    label = "Hospital Email",
-                                    value = "admin@cityhospital.org"
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-                                ProfileInfoRow(
-                                    icon = Icons.Default.Navigation,
-                                    label = "Official Website",
-                                    value = "www.citygeneralhospital.org"
+                                    label = "Contact",
+                                    value = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) "admin@cityhospital.org" else (realHospitalProfile?.contact?.takeIf { it.isNotBlank() } ?: "Not configured")
                                 )
                             }
                         }
                     }
 
                     if (role != UserRole.HOSPITAL) {
-                        // Contact Information
                         SectionHeader(title = "Contact Details")
                         MediSlotCard(modifier = Modifier.fillMaxWidth()) {
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -3741,8 +3997,8 @@ fun PatientProfileScreen(
                                     icon = Icons.Default.Email,
                                     label = "Email Address",
                                     value = when (role) {
-                                        UserRole.PATIENT -> MockData.patientProfile.email
-                                        UserRole.DOCTOR -> MockData.doctors[0].email
+                                        UserRole.PATIENT -> if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) MockData.patientProfile.email else (if (userEmail.isBlank()) "patient@medislot.com" else userEmail)
+                                        UserRole.DOCTOR -> if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) MockData.doctors[0].email else (if (userEmail.isBlank()) "doctor@medislot.com" else userEmail)
                                         UserRole.HOSPITAL -> "admin@cityhospital.org"
                                     }
                                 )
@@ -3751,20 +4007,29 @@ fun PatientProfileScreen(
                                     icon = Icons.Default.Phone,
                                     label = "Contact Number",
                                     value = when (role) {
-                                        UserRole.PATIENT -> MockData.patientProfile.contact
-                                        UserRole.DOCTOR -> MockData.doctors[0].contact
+                                        UserRole.PATIENT -> if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) MockData.patientProfile.contact else (realPatientProfile?.contact ?: "+1 (555) 000-0000")
+                                        UserRole.DOCTOR -> if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) MockData.doctors[0].contact else (realDoctorProfile?.contact ?: "+1 (555) 000-0000")
                                         UserRole.HOSPITAL -> "+1 (555) 902-1823"
                                     }
                                 )
                             }
                         }
 
-                        // Profile Actions
+                        // Profile Actions (Edit Profile)
                         MediSlotCard(modifier = Modifier.fillMaxWidth()) {
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().clickable {
-                                        Toast.makeText(context, "Edit Profile Dialog coming soon", Toast.LENGTH_SHORT).show()
+                                        // Initialize edit values
+                                        if (role == UserRole.PATIENT) {
+                                            editContact = realPatientProfile?.contact ?: "+1 (555) 000-0000"
+                                            editAge = (realPatientProfile?.age ?: 21).toString()
+                                            editBloodGroup = realPatientProfile?.blood_group ?: "B+"
+                                            editHeight = realPatientProfile?.height ?: "175 cm"
+                                            editWeight = realPatientProfile?.weight ?: "68 kg"
+                                            editAllergies = realPatientProfile?.allergies ?: "None"
+                                        }
+                                        showEditDialog = true
                                     },
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
@@ -3785,13 +4050,115 @@ fun PatientProfileScreen(
                     // Logout CTA
                     MediSlotButton(
                         text = "Sign Out",
-                        onClick = onLogout,
+                        onClick = {
+                            coroutineScope.launch {
+                                com.medislot.app.data.repository.AuthenticationRepositoryImpl().logout()
+                                com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = false
+                                onLogout()
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         gradient = SOSGradient
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
                 }
+            }
+
+            // Edit Profile Dialog
+            if (showEditDialog) {
+                AlertDialog(
+                    onDismissRequest = { showEditDialog = false },
+                    title = { Text("Edit Profile Details", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = editContact,
+                                onValueChange = { editContact = it },
+                                label = { Text("Contact Number") },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = editAge,
+                                onValueChange = { editAge = it },
+                                label = { Text("Age") },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = editBloodGroup,
+                                onValueChange = { editBloodGroup = it },
+                                label = { Text("Blood Group") },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = editHeight,
+                                onValueChange = { editHeight = it },
+                                label = { Text("Height") },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = editWeight,
+                                onValueChange = { editWeight = it },
+                                label = { Text("Weight") },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = editAllergies,
+                                onValueChange = { editAllergies = it },
+                                label = { Text("Allergies") },
+                                singleLine = true
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = !isSavingProfile,
+                            onClick = {
+                                coroutineScope.launch {
+                                    isSavingProfile = true
+                                    val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                                    val uid = authRepo.getUid() ?: "pat_demo"
+                                    if (role == UserRole.PATIENT) {
+                                        val patRepo = com.medislot.app.data.repository.PatientRepositoryImpl()
+                                        val updated = patRepo.updateProfile(
+                                            com.medislot.app.network.PatientProfileRequest(
+                                                uid = uid,
+                                                age = editAge.toIntOrNull() ?: realPatientProfile?.age ?: 21,
+                                                gender = realPatientProfile?.gender ?: "Male",
+                                                contact = editContact.ifBlank { realPatientProfile?.contact ?: "+1 (555) 000-0000" },
+                                                blood_group = editBloodGroup.ifBlank { realPatientProfile?.blood_group ?: "B+" },
+                                                height = editHeight.ifBlank { realPatientProfile?.height ?: "175 cm" },
+                                                weight = editWeight.ifBlank { realPatientProfile?.weight ?: "68 kg" },
+                                                bmi = "22.2",
+                                                allergies = editAllergies.ifBlank { realPatientProfile?.allergies ?: "None" },
+                                                medications = realPatientProfile?.medications ?: "None",
+                                                medical_history = realPatientProfile?.medical_history ?: "None"
+                                            )
+                                        )
+                                        updated.fold(
+                                            onSuccess = { response ->
+                                                realPatientProfile = response
+                                                Toast.makeText(context, "Profile updated and persisted successfully!", Toast.LENGTH_SHORT).show()
+                                            },
+                                            onFailure = {
+                                                Toast.makeText(context, "Profile update failed", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+                                    isSavingProfile = false
+                                    showEditDialog = false
+                                }
+                            }
+                        ) {
+                            Text("Save Changes", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showEditDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
 
             // Pull to refresh overlay indicator

@@ -13,42 +13,23 @@ class AuthenticationRepositoryImpl : AuthenticationRepository {
 
     override suspend fun login(email: String, password: String): Result<TokenResponse> {
         return try {
-            val response = RetrofitClient.apiService.login(LoginRequest(email, password))
+            val response = RetrofitClient.apiService.login(LoginRequest(email.trim(), password))
             dataStore.saveTokens(response.access_token, response.refresh_token)
             dataStore.saveUserSession(response.uid, response.role, response.email)
             Result.success(response)
         } catch (e: Exception) {
-            // Mock authentication fallback for presentation/demo mode
-            val mockResponse = TokenResponse(
-                access_token = "mock_access_token_" + email.hashCode(),
-                refresh_token = "mock_refresh_token_" + email.hashCode(),
-                uid = "mock_uid_" + email.take(4),
-                role = if (email.contains("doctor")) "doctor" else if (email.contains("admin")) "super_admin" else if (email.contains("hospital")) "hospital_coordinator" else "patient",
-                email = email
-            )
-            dataStore.saveTokens(mockResponse.access_token, mockResponse.refresh_token)
-            dataStore.saveUserSession(mockResponse.uid, mockResponse.role, mockResponse.email)
-            Result.success(mockResponse)
+            Result.failure(e)
         }
     }
 
     override suspend fun register(email: String, password: String, fullName: String, role: String): Result<TokenResponse> {
         return try {
-            val response = RetrofitClient.apiService.register(RegisterRequest(email, password, fullName, role))
+            val response = RetrofitClient.apiService.register(RegisterRequest(email.trim(), password, fullName.trim(), role))
             dataStore.saveTokens(response.access_token, response.refresh_token)
             dataStore.saveUserSession(response.uid, response.role, response.email)
             Result.success(response)
         } catch (e: Exception) {
-            val mockResponse = TokenResponse(
-                access_token = "mock_access_token_" + email.hashCode(),
-                refresh_token = "mock_refresh_token_" + email.hashCode(),
-                uid = "mock_uid_" + email.take(4),
-                role = role,
-                email = email
-            )
-            dataStore.saveTokens(mockResponse.access_token, mockResponse.refresh_token)
-            dataStore.saveUserSession(mockResponse.uid, mockResponse.role, mockResponse.email)
-            Result.success(mockResponse)
+            Result.failure(e)
         }
     }
 

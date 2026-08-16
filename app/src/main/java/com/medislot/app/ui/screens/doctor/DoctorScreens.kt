@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -383,6 +384,77 @@ fun DoctorDashboardScreen(
         }
     }
     
+    // Real appointments & profile loading state
+    var isAppointmentsLoading by remember { mutableStateOf(false) }
+    var appointmentsErrorMessage by remember { mutableStateOf<String?>(null) }
+    var refreshTrigger by remember { mutableStateOf(0) }
+
+    LaunchedEffect(refreshTrigger) {
+        if (!com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            isAppointmentsLoading = true
+            appointmentsErrorMessage = null
+            val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+            val docUid = authRepo.getUid() ?: ""
+            val docRepo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+
+            if (docUid.isNotBlank()) {
+                val profRes = docRepo.getProfile(docUid)
+                profRes.onSuccess { p ->
+                    DoctorWorkspaceState.doctorProfile = DoctorProfileInfo(
+                        name = p.name,
+                        specialization = p.specialization,
+                        qualification = p.mbbs_institution ?: "Medical Specialist",
+                        experience = if (p.experience_years > 0) "${p.experience_years} Years" else "5 Years",
+                        hospital = p.hospital_name,
+                        licenseNumber = p.registration_number ?: "LIC-12345",
+                        dutyHours = p.availability,
+                        contactNumber = p.contact
+                    )
+                    DoctorWorkspaceState.activeSlots.clear()
+                    DoctorWorkspaceState.activeSlots.addAll(
+                        p.slot_times?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+                    )
+                }
+            }
+
+            val result = docRepo.getAppointments(docUid)
+            result.fold(
+                onSuccess = { realAppointments ->
+                    isAppointmentsLoading = false
+                    DoctorWorkspaceState.appointments.clear()
+                    val mappedRecords = realAppointments.mapIndexed { index, apt ->
+                        PatientRecord(
+                            id = apt.id,
+                            name = apt.patient_name ?: "Patient (${apt.patient_id.take(8)})",
+                            queueNumber = if (apt.queue_number > 0) apt.queue_number else (index + 1),
+                            appointmentTime = "${apt.date} • ${apt.time}",
+                            age = 30,
+                            gender = "Patient",
+                            bloodGroup = "N/A",
+                            height = "170 cm",
+                            weight = "70 kg",
+                            bmi = "24.2",
+                            allergies = emptyList(),
+                            medications = emptyList(),
+                            history = emptyList(),
+                            previousVisits = emptyList(),
+                            uploadedReports = emptyList(),
+                            emergencyContact = "Contact Patient",
+                            symptoms = "Consultation - ${apt.department}",
+                            priority = if (apt.status.equals("Emergency", ignoreCase = true)) "Emergency" else "Normal",
+                            status = apt.status
+                        )
+                    }
+                    DoctorWorkspaceState.appointments.addAll(mappedRecords)
+                },
+                onFailure = { err ->
+                    isAppointmentsLoading = false
+                    appointmentsErrorMessage = com.medislot.app.utils.NetworkErrorUtils.getReadableErrorMessage(err)
+                }
+            )
+        }
+    }
+
     // Break Timer ticking
     val currentStatus = DoctorWorkspaceState.dutyStatus
     LaunchedEffect(key1 = currentStatus) {
@@ -454,6 +526,33 @@ fun DoctorDashboardScreen(
             verticalArrangement = Arrangement.Top
         ) {
             Spacer(modifier = Modifier.height(12.dp))
+
+            if (isAppointmentsLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
+                Spacer(modifier = Modifier.height(8.dp))
+            } else if (appointmentsErrorMessage != null) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = appointmentsErrorMessage!!,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(onClick = { refreshTrigger++ }) {
+                            Text("Retry")
+                        }
+                    }
+                }
+            }
             
             // Header Row: Avatar, Greeting, Date & Room details
             Row(
@@ -2429,7 +2528,13 @@ fun SlotManagementScreen(
         "02:00 PM", "02:30 PM", "03:00 PM", "03:30 PM",
         "04:00 PM", "04:30 PM"
     )
-    val activeSlots = remember { mutableStateListOf("09:00 AM", "10:30 AM", "11:00 AM", "02:30 PM", "04:00 PM") }
+    val activeSlots = remember {
+        mutableStateListOf<String>().apply {
+            addAll(DoctorWorkspaceState.activeSlots)
+        }
+    }
+    val coroutineScope = rememberCoroutineScope()
+    var isSaving by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = { MediSlotTopBar(title = "Manage Consulting Slots", onBackClick = onNavigateBack) }
@@ -2483,8 +2588,41 @@ fun SlotManagementScreen(
             }
 
             MediSlotButton(
-                text = "Save Duty Configuration",
-                onClick = onNavigateBack,
+                text = if (isSaving) "Saving..." else "Save Duty Configuration",
+                enabled = !isSaving,
+                onClick = {
+                    coroutineScope.launch {
+                        isSaving = true
+                        val slotTimesString = activeSlots.joinToString(",")
+                        if (!com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                            val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                            val docUid = authRepo.getUid() ?: ""
+                            val docRepo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+                            if (docUid.isNotBlank()) {
+                                val currentProfileResult = docRepo.getProfile(docUid)
+                                val currentProfile = currentProfileResult.getOrNull()
+                                if (currentProfile != null) {
+                                    docRepo.updateProfile(
+                                        com.medislot.app.network.DoctorProfileRequest(
+                                            uid = docUid,
+                                            specialization = currentProfile.specialization,
+                                            hospital_name = currentProfile.hospital_name,
+                                            experience_years = currentProfile.experience_years,
+                                            contact = currentProfile.contact,
+                                            mbbs_institution = currentProfile.mbbs_institution ?: "",
+                                            registration_number = currentProfile.registration_number ?: "",
+                                            slot_times = slotTimesString
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        DoctorWorkspaceState.activeSlots.clear()
+                        DoctorWorkspaceState.activeSlots.addAll(activeSlots)
+                        isSaving = false
+                        onNavigateBack()
+                    }
+                },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
             )
         }
@@ -2513,6 +2651,7 @@ fun DoctorProfileScreen(
     var editCertifications by remember { mutableStateOf(profile.certifications) }
     var editPublications by remember { mutableStateOf(profile.researchPublications) }
 
+    val coroutineScope = rememberCoroutineScope()
     if (showEditDialog) {
         AlertDialog(
             onDismissRequest = { showEditDialog = false },
@@ -2549,6 +2688,26 @@ fun DoctorProfileScreen(
                             researchPublications = editPublications
                         )
                         DoctorWorkspaceState.recalculateEstimatedWaitTimes()
+                        if (!com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                            coroutineScope.launch {
+                                val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                                val uid = authRepo.getUid()
+                                if (uid != null) {
+                                    val docRepo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+                                    docRepo.updateProfile(
+                                        com.medislot.app.network.DoctorProfileRequest(
+                                            uid = uid,
+                                            specialization = editSpecialty,
+                                            hospital_name = profile.hospital,
+                                            experience_years = editExperience.filter { it.isDigit() }.toIntOrNull() ?: 5,
+                                            contact = "+1 (555) 000-0000",
+                                            mbbs_institution = editQualification,
+                                            registration_number = editLicense
+                                        )
+                                    )
+                                }
+                            }
+                        }
                         showEditDialog = false
                         Toast.makeText(context, "Profile updated successfully.", Toast.LENGTH_SHORT).show()
                     }
@@ -2570,7 +2729,13 @@ fun DoctorProfileScreen(
                 title = "Doctor Workspace Profile",
                 onBackClick = onNavigateBack,
                 actions = {
-                    IconButton(onClick = onLogout) {
+                    IconButton(onClick = {
+                        coroutineScope.launch {
+                            com.medislot.app.data.repository.AuthenticationRepositoryImpl().logout()
+                            com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = false
+                            onLogout()
+                        }
+                    }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Logout,
                             contentDescription = "Logout",

@@ -80,6 +80,15 @@ class GeminiRepositoryImpl(private val service: GeminiService) : GeminiRepositor
             }
         }
 
+        val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+        if (!isDemo) {
+            return if (cached != null) {
+                Result.failure(FallbackCacheException(cached.data, cached.timestamp, lastError))
+            } else {
+                Result.failure(lastError)
+            }
+        }
+
         android.util.Log.w("MediSlotAI", "Final fallback to mock data")
         return if (cached != null) {
             Result.failure(FallbackCacheException(cached.data, cached.timestamp, lastError))
@@ -210,6 +219,11 @@ class GeminiRepositoryImpl(private val service: GeminiService) : GeminiRepositor
                 android.util.Log.e("MediSlotAI", "Model failed: $modelName. Error: $error", error)
                 lastError = error
             }
+        }
+
+        val isDemo = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+        if (!isDemo) {
+            return Result.failure(lastError)
         }
 
         android.util.Log.w("MediSlotAI", "Final fallback to mock data")

@@ -33,6 +33,7 @@ import com.medislot.app.ui.components.*
 import com.medislot.app.viewmodel.AiState
 import com.medislot.app.viewmodel.DoctorRecruitmentViewModel
 import com.medislot.app.viewmodel.SortOption
+import com.medislot.app.ui.screens.auth.DemoConfig
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +45,8 @@ fun DoctorRecruitmentScreen(
     val applications by viewModel.filteredApplications.collectAsState()
     val stats by viewModel.recruitmentStats.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedDept by viewModel.selectedDept.collectAsState()
@@ -235,7 +238,24 @@ fun DoctorRecruitmentScreen(
             Spacer(modifier = Modifier.height(14.dp))
 
             // Main lazy applications list
-            if (applications.isEmpty()) {
+            val isDemoMode = DemoConfig.isDemoModeActive
+            if (isLoading) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (errorMessage != null && !isDemoMode) {
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(onClick = { viewModel.loadApplications() }) {
+                        Text("Retry")
+                    }
+                }
+            } else if (applications.isEmpty()) {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.PersonSearch, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(48.dp))

@@ -58,27 +58,7 @@ class DoctorRepositoryImpl : DoctorRepository {
                     )
                 )
             } else {
-                Result.success(
-                    DoctorProfileResponse(
-                        id = "doc_mock",
-                        uid = uid,
-                        name = "Dr. Jane Smith",
-                        specialization = "General Medicine",
-                        hospital_name = "City General Hospital",
-                        rating = 4.8f,
-                        experience_years = 5,
-                        fees = "$100",
-                        bio = "General Physician",
-                        availability = "Monday - Friday",
-                        slot_times = "09:00 AM,10:30 AM,02:00 PM",
-                        contact = "+1 (555) 999-8888",
-                        status = "On Duty",
-                        room = "Room 3C",
-                        shift = "Morning Shift",
-                        mbbs_institution = "Harvard Medical School",
-                        registration_number = "MC-8872"
-                    )
-                )
+                Result.failure(e)
             }
         }
     }
@@ -109,16 +89,16 @@ class DoctorRepositoryImpl : DoctorRepository {
             )
             Result.success(response)
         } catch (e: Exception) {
-            val mockResponse = DoctorProfileResponse(
-                id = "doc_mock",
+            val savedLocal = DoctorProfileResponse(
+                id = "doc_" + request.uid.take(8),
                 uid = request.uid,
-                name = "Dr. Jane Smith",
+                name = "Doctor Profile",
                 specialization = request.specialization,
                 hospital_name = request.hospital_name,
                 rating = 4.8f,
                 experience_years = request.experience_years,
                 fees = "$100",
-                bio = "Updated Bio",
+                bio = "Bio",
                 availability = "Monday - Friday",
                 slot_times = "09:00 AM,10:30 AM,02:00 PM",
                 contact = request.contact,
@@ -130,44 +110,88 @@ class DoctorRepositoryImpl : DoctorRepository {
             )
             doctorDao.insertDoctor(
                 LocalDoctorProfile(
-                    id = mockResponse.id,
-                    uid = mockResponse.uid,
-                    name = mockResponse.name,
-                    specialization = mockResponse.specialization,
-                    hospitalName = mockResponse.hospital_name,
-                    rating = mockResponse.rating,
-                    experienceYears = mockResponse.experience_years,
-                    fees = mockResponse.fees,
-                    bio = mockResponse.bio,
-                    availability = mockResponse.availability,
-                    slotTimes = mockResponse.slot_times,
-                    contact = mockResponse.contact,
-                    status = mockResponse.status,
-                    room = mockResponse.room,
-                    shift = mockResponse.shift,
-                    mbbsInstitution = mockResponse.mbbs_institution,
-                    registrationNumber = mockResponse.registration_number
+                    id = savedLocal.id,
+                    uid = savedLocal.uid,
+                    name = savedLocal.name,
+                    specialization = savedLocal.specialization,
+                    hospitalName = savedLocal.hospital_name,
+                    rating = savedLocal.rating,
+                    experienceYears = savedLocal.experience_years,
+                    fees = savedLocal.fees,
+                    bio = savedLocal.bio,
+                    availability = savedLocal.availability,
+                    slotTimes = savedLocal.slot_times,
+                    contact = savedLocal.contact,
+                    status = savedLocal.status,
+                    room = savedLocal.room,
+                    shift = savedLocal.shift,
+                    mbbsInstitution = savedLocal.mbbs_institution,
+                    registrationNumber = savedLocal.registration_number
                 )
             )
-            Result.success(mockResponse)
+            Result.success(savedLocal)
         }
     }
 
     override suspend fun getAppointments(doctorId: String): Result<List<AppointmentResponse>> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            val demoApps = com.medislot.app.data.model.MockData.appointments.mapIndexed { idx, appt ->
+                AppointmentResponse(
+                    id = appt.id,
+                    patient_id = "pat_demo_$idx",
+                    doctor_id = doctorId,
+                    doctor_name = appt.doctorName,
+                    department = appt.department,
+                    hospital = appt.hospital,
+                    date = appt.date,
+                    time = appt.time,
+                    status = appt.status,
+                    queue_number = idx + 1,
+                    patient_name = "Sarah Connor"
+                )
+            }
+            return Result.success(demoApps)
+        }
+
         return try {
             val response = RetrofitClient.apiService.getDoctorAppointments(doctorId)
             Result.success(response)
         } catch (e: Exception) {
-            Result.success(emptyList())
+            Result.failure(e)
         }
     }
 
     override suspend fun getAllDoctors(): Result<List<DoctorProfileResponse>> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            val demoResponses = com.medislot.app.data.model.MockData.doctors.map { doc ->
+                DoctorProfileResponse(
+                    id = doc.id,
+                    uid = "uid_${doc.id}",
+                    name = doc.name,
+                    specialization = doc.department,
+                    hospital_name = doc.hospital,
+                    rating = doc.rating,
+                    experience_years = doc.experience.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 5,
+                    fees = doc.fees,
+                    bio = doc.bio,
+                    availability = doc.availability,
+                    slot_times = doc.slotTimes.joinToString(","),
+                    contact = doc.contact,
+                    status = doc.status,
+                    room = doc.room,
+                    shift = doc.shift,
+                    mbbs_institution = "Medical College",
+                    registration_number = "REG-12345"
+                )
+            }
+            return Result.success(demoResponses)
+        }
+
         return try {
             val response = RetrofitClient.apiService.getDoctorsList()
             Result.success(response)
         } catch (e: Exception) {
-            Result.success(emptyList())
+            Result.failure(e)
         }
     }
 }

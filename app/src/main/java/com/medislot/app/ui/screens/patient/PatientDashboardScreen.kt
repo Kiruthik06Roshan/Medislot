@@ -1,5 +1,10 @@
 package com.medislot.app.ui.screens.patient
 
+import com.medislot.app.network.toDoctorProfileData
+import com.medislot.app.network.toAppointmentData
+import com.medislot.app.utils.NetworkErrorUtils
+import androidx.compose.material.icons.filled.Notifications
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -226,8 +231,69 @@ fun PatientDashboardScreen(
     onNavigateToQueue: (String) -> Unit,
     viewModel: com.medislot.app.viewmodel.AiViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
-    val unreadNotifsCount = MockData.notifications.count { !it.isRead }
-    val activeAppointment = MockData.appointments.firstOrNull() 
+    val unreadNotifsCount = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) MockData.notifications.count { !it.isRead } else 0
+
+    var userEmail by remember { mutableStateOf("") }
+    var topDoctors by remember { mutableStateOf<List<com.medislot.app.data.model.DoctorProfileData>>(emptyList()) }
+    var patientAppointments by remember { mutableStateOf<List<com.medislot.app.network.AppointmentResponse>>(emptyList()) }
+    var patientMedicalRecords by remember { mutableStateOf<List<com.medislot.app.network.MedicalRecordResponse>>(emptyList()) }
+    var realPatientProfile by remember { mutableStateOf<com.medislot.app.network.PatientProfileResponse?>(null) }
+    var dashboardErrorMessage by remember { mutableStateOf<String?>(null) }
+    var isDashboardLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            topDoctors = MockData.doctors.take(2)
+            isDashboardLoading = false
+        } else {
+            isDashboardLoading = true
+            dashboardErrorMessage = null
+            try {
+                val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                val patientRepo = com.medislot.app.data.repository.PatientRepositoryImpl()
+                val docRepo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+
+                userEmail = authRepo.getEmail() ?: ""
+                val patientUid = authRepo.getUid() ?: ""
+
+                val docRes = docRepo.getAllDoctors()
+                topDoctors = docRes.getOrNull()?.map { it.toDoctorProfileData() }?.take(2) ?: emptyList()
+
+                if (patientUid.isNotEmpty()) {
+                    val profRes = patientRepo.getProfile(patientUid)
+                    realPatientProfile = profRes.getOrNull()
+
+                    val aptsRes = patientRepo.getAppointments(patientUid)
+                    if (aptsRes.isSuccess) {
+                        patientAppointments = aptsRes.getOrNull() ?: emptyList()
+                    } else {
+                        dashboardErrorMessage = NetworkErrorUtils.getReadableErrorMessage(aptsRes.exceptionOrNull() ?: Exception("Failed to load appointments"))
+                    }
+
+                    val recsRes = patientRepo.getMedicalRecords(patientUid)
+                    if (recsRes.isSuccess) {
+                        patientMedicalRecords = recsRes.getOrNull() ?: emptyList()
+                    }
+                }
+            } catch (e: Exception) {
+                dashboardErrorMessage = NetworkErrorUtils.getReadableErrorMessage(e)
+            } finally {
+                isDashboardLoading = false
+            }
+        }
+    }
+
+    val activeAppointment: com.medislot.app.data.model.AppointmentData? = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+        MockData.appointments.firstOrNull()
+    } else {
+        patientAppointments.map { it.toAppointmentData() }.firstOrNull { it.status == "Upcoming" || it.status == "In Consultation" }
+    }
+
+    val patientDisplayName = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+        MockData.patientProfile.name
+    } else {
+        if (userEmail.contains("@")) userEmail.substringBefore("@").replace(".", " ").capitalize(java.util.Locale.getDefault()) else "Patient"
+    }
 
     // Loading & Refreshing States
     var isScreenLoading by remember { mutableStateOf(true) }
@@ -371,7 +437,7 @@ fun PatientDashboardScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = MockData.patientProfile.name,
+                                text = patientDisplayName,
                                 style = MaterialTheme.typography.displayLarge.copy(fontSize = 28.sp),
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onBackground
@@ -389,7 +455,7 @@ fun PatientDashboardScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = MockData.patientProfile.name.take(2).uppercase(),
+                                    text = patientDisplayName.take(2).uppercase(),
                                     color = MaterialTheme.colorScheme.primary,
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleLarge
@@ -718,6 +784,10 @@ fun PatientDashboardScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     // Hero Section: Health Score Card
+                    // Hero Section: Health Score Card
+                    val isDemoMode = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+                    val hasVitalsData = isDemoMode || (realPatientProfile?.vitals_heart_rate != null)
+
                     MediSlotCard(
                         modifier = Modifier.fillMaxWidth().clickScale { }
                     ) {
@@ -735,7 +805,7 @@ fun PatientDashboardScreen(
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Your health indexes are looking premium. Keep up the good work!",
+                                    text = if (hasVitalsData) "Your health indexes are looking premium. Keep up the good work!" else "Health score unavailable. Record health vitals to generate your score.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -746,14 +816,14 @@ fun PatientDashboardScreen(
                                 modifier = Modifier.size(72.dp)
                             ) {
                                 CircularProgressIndicator(
-                                    progress = { 0.92f },
+                                    progress = { if (hasVitalsData) 0.92f else 0f },
                                     color = MaterialTheme.colorScheme.secondary,
                                     trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
                                     strokeWidth = 6.dp,
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 Text(
-                                    text = "92",
+                                    text = if (hasVitalsData) "92" else "--",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -767,98 +837,160 @@ fun PatientDashboardScreen(
                     // 3. Health Reminders (Medicine and Upcoming Tests)
                     SectionHeader(title = "Health Reminders")
                     Spacer(modifier = Modifier.height(12.dp))
-                    MediSlotCard(modifier = Modifier.fillMaxWidth().clickScale { }) {
-                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
+
+                    if (isDemoMode) {
+                        MediSlotCard(modifier = Modifier.fillMaxWidth().clickScale { }) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Medication,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(22.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Medication,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.secondary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Medicine Reminder",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "Lisinopril 10mg (1x daily)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "Scheduled for 08:00 PM",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    
+                                    val isTaken = takenMeds.contains("Lisinopril")
+                                    MediSlotSecondaryButton(
+                                        text = if (isTaken) "Taken ✓" else "Mark Taken",
+                                        onClick = {
+                                            if (!isTaken) takenMeds.add("Lisinopril")
+                                        },
+                                        enabled = !isTaken,
+                                        modifier = Modifier.width(110.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Medicine Reminder",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Lisinopril 10mg (1x daily)",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = "Scheduled for 08:00 PM",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Science,
+                                            contentDescription = null,
+                                            tint = Color(0xFF3B82F6),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Upcoming Diagnostic Test",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "Complete Blood Count (CBC)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "Tomorrow at 09:00 AM • Lab C",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFFEAB308),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
-                                
-                                val isTaken = takenMeds.contains("Lisinopril")
-                                MediSlotSecondaryButton(
-                                    text = if (isTaken) "Taken ✓" else "Mark Taken",
-                                    onClick = {
-                                        if (!isTaken) takenMeds.add("Lisinopril")
-                                    },
-                                    enabled = !isTaken,
-                                    modifier = Modifier.width(110.dp)
+                            }
+                        }
+                    } else if (patientMedicalRecords.isEmpty()) {
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Notifications,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(40.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "No health reminders",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "No active medicine reminders or test alerts scheduled.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
                                 )
                             }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Science,
-                                        contentDescription = null,
-                                        tint = Color(0xFF3B82F6),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Upcoming Diagnostic Test",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Complete Blood Count (CBC)",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = "Tomorrow at 09:00 AM • Lab C",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color(0xFFEAB308),
-                                        fontWeight = FontWeight.Bold
-                                    )
+                        }
+                    } else {
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                patientMedicalRecords.take(3).forEach { rec ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Description,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = rec.title,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = "${rec.record_type} • ${rec.date}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -872,69 +1004,95 @@ fun PatientDashboardScreen(
                         subtitle = "Easily book follow-up visits"
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(bottom = 8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(MockData.doctors.take(2)) { doc ->
-                            Box(
-                                modifier = Modifier
-                                    .width(280.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
-                                    .background(MaterialTheme.colorScheme.surface)
-                                    .clickScale { onNavigateToBooking(doc.id) }
-                                    .padding(16.dp)
+
+                    val completedAppointments = if (isDemoMode) emptyList() else patientAppointments.filter { it.status == "Completed" }
+
+                    if (!isDemoMode && completedAppointments.isEmpty()) {
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
                             ) {
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.LocalHospital,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
+                                Text(
+                                    text = "No recent consultations",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Your completed appointment history will be listed here.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(bottom = 8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(if (topDoctors.isNotEmpty()) topDoctors else if (isDemoMode) MockData.doctors.take(2) else emptyList()) { doc ->
+                                Box(
+                                    modifier = Modifier
+                                        .width(280.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+                                        .background(MaterialTheme.colorScheme.surface)
+                                        .clickScale { onNavigateToBooking(doc.id) }
+                                        .padding(16.dp)
+                                ) {
+                                    Column {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.LocalHospital,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column {
+                                                Text(
+                                                    text = doc.name,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    text = doc.department,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             Text(
-                                                text = doc.name,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = doc.department,
-                                                style = MaterialTheme.typography.bodySmall,
+                                                text = doc.hospital.take(20) + "...",
+                                                style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
+                                            Text(
+                                                text = "Book again",
+                                                color = MaterialTheme.colorScheme.primary,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
                                         }
-                                    }
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = doc.hospital.take(20) + "...",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = "Book again",
-                                            color = MaterialTheme.colorScheme.primary,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
                                     }
                                 }
                             }
@@ -946,6 +1104,13 @@ fun PatientDashboardScreen(
                     // 5. Daily Vitals Section
                     SectionHeader(title = "My Daily Vitals")
                     Spacer(modifier = Modifier.height(12.dp))
+
+                    val displayHeartRate = if (isDemoMode) "74" else realPatientProfile?.vitals_heart_rate?.toString() ?: "--"
+                    val displayBp = if (isDemoMode) "118/79" else realPatientProfile?.vitals_bp ?: "--"
+                    val displaySpo2 = if (isDemoMode) "98" else realPatientProfile?.vitals_spo2?.toString() ?: "--"
+                    val displayTemp = if (isDemoMode) "98.6" else realPatientProfile?.vitals_temperature?.toString() ?: "--"
+                    val displaySugar = if (isDemoMode) "95" else realPatientProfile?.vitals_blood_sugar?.toString() ?: "--"
+
                     Column(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -956,16 +1121,16 @@ fun PatientDashboardScreen(
                         ) {
                             MetricCard(
                                 label = "Heart Rate",
-                                value = "74",
-                                unit = "BPM",
+                                value = displayHeartRate,
+                                unit = if (displayHeartRate != "--") "BPM" else "",
                                 icon = Icons.Default.Favorite,
                                 iconColor = Color(0xFFEF4444),
                                 modifier = Modifier.weight(1f)
                             )
                             MetricCard(
                                 label = "Blood Pressure",
-                                value = "118/79",
-                                unit = "mmHg",
+                                value = displayBp,
+                                unit = if (displayBp != "--") "mmHg" else "",
                                 icon = Icons.Default.HealthAndSafety,
                                 iconColor = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
@@ -977,16 +1142,16 @@ fun PatientDashboardScreen(
                         ) {
                             MetricCard(
                                 label = "SpO2 Oxygen",
-                                value = "98",
-                                unit = "%",
+                                value = displaySpo2,
+                                unit = if (displaySpo2 != "--") "%" else "",
                                 icon = Icons.Default.WaterDrop,
                                 iconColor = Color(0xFF3B82F6),
                                 modifier = Modifier.weight(1f)
                             )
                             MetricCard(
                                 label = "Body Temp",
-                                value = "98.6",
-                                unit = "°F",
+                                value = displayTemp,
+                                unit = if (displayTemp != "--") "°F" else "",
                                 icon = Icons.Default.Thermostat,
                                 iconColor = Color(0xFFF59E0B),
                                 modifier = Modifier.weight(1f)
@@ -994,8 +1159,8 @@ fun PatientDashboardScreen(
                         }
                         MetricCard(
                             label = "Fasting Blood Sugar",
-                            value = "95",
-                            unit = "mg/dL",
+                            value = displaySugar,
+                            unit = if (displaySugar != "--") "mg/dL" else "",
                             icon = Icons.Default.Description,
                             iconColor = Color(0xFF10B981),
                             modifier = Modifier.fillMaxWidth()
@@ -1532,7 +1697,9 @@ fun PatientDashboardScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("Checklist for appointment with ${activeAppointment.doctorName} (${activeAppointment.department})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val docName = activeAppointment?.doctorName ?: "Doctor"
+                    val deptName = activeAppointment?.department ?: "General Medicine"
+                    Text("Checklist for appointment with $docName ($deptName)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
 
                     when (val state = prepState) {
@@ -1542,7 +1709,7 @@ fun PatientDashboardScreen(
                         is AiState.Failure -> {
                             AiErrorCard(
                                 errorText = state.error,
-                                onRetry = { viewModel.loadAppointmentPrep(activeAppointment.doctorName, activeAppointment.department, "General fatigue checkup") }
+                                onRetry = { viewModel.loadAppointmentPrep(docName, deptName, "General fatigue checkup") }
                             )
                         }
                         is AiState.Success -> {

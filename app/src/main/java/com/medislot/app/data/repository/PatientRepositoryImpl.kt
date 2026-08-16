@@ -50,23 +50,7 @@ class PatientRepositoryImpl : PatientRepository {
                     )
                 )
             } else {
-                // Mock fallback
-                Result.success(
-                    PatientProfileResponse(
-                        id = "pat_mock",
-                        uid = uid,
-                        age = 29,
-                        gender = "Female",
-                        contact = "+1 (555) 019-2834",
-                        blood_group = "O-Positive (O+)",
-                        height = "168 cm",
-                        weight = "58 kg",
-                        bmi = "20.5",
-                        allergies = "Penicillin",
-                        medications = "Multivitamin Active",
-                        medical_history = "Mild Hypertension"
-                    )
-                )
+                Result.failure(e)
             }
         }
     }
@@ -92,9 +76,9 @@ class PatientRepositoryImpl : PatientRepository {
             )
             Result.success(response)
         } catch (e: Exception) {
-            // Cache locally and report success (sync can happen later)
-            val mockResponse = PatientProfileResponse(
-                id = "pat_mock",
+            // Cache locally in Room DB
+            val savedLocal = PatientProfileResponse(
+                id = "pat_" + request.uid.take(8),
                 uid = request.uid,
                 age = request.age,
                 gender = request.gender,
@@ -109,49 +93,80 @@ class PatientRepositoryImpl : PatientRepository {
             )
             patientDao.insertProfile(
                 LocalPatientProfile(
-                    id = mockResponse.id,
-                    uid = mockResponse.uid,
-                    age = mockResponse.age,
-                    gender = mockResponse.gender,
-                    contact = mockResponse.contact,
-                    bloodGroup = mockResponse.blood_group,
-                    height = mockResponse.height,
-                    weight = mockResponse.weight,
-                    bmi = mockResponse.bmi,
-                    allergies = mockResponse.allergies,
-                    medications = mockResponse.medications,
-                    medicalHistory = mockResponse.medical_history
+                    id = savedLocal.id,
+                    uid = savedLocal.uid,
+                    age = savedLocal.age,
+                    gender = savedLocal.gender,
+                    contact = savedLocal.contact,
+                    bloodGroup = savedLocal.blood_group,
+                    height = savedLocal.height,
+                    weight = savedLocal.weight,
+                    bmi = savedLocal.bmi,
+                    allergies = savedLocal.allergies,
+                    medications = savedLocal.medications,
+                    medicalHistory = savedLocal.medical_history
                 )
             )
-            Result.success(mockResponse)
+            Result.success(savedLocal)
         }
     }
 
     override suspend fun getAppointments(patientId: String): Result<List<AppointmentResponse>> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            val demoApps = com.medislot.app.data.model.MockData.appointments.mapIndexed { idx, appt ->
+                AppointmentResponse(
+                    id = appt.id,
+                    patient_id = patientId,
+                    doctor_id = "doc_$idx",
+                    doctor_name = appt.doctorName,
+                    department = appt.department,
+                    hospital = appt.hospital,
+                    date = appt.date,
+                    time = appt.time,
+                    status = appt.status,
+                    queue_number = appt.queueNumber
+                )
+            }
+            return Result.success(demoApps)
+        }
+
         return try {
             val response = RetrofitClient.apiService.getPatientAppointments(patientId)
             Result.success(response)
         } catch (e: Exception) {
-            Result.success(emptyList())
+            Result.failure(e)
         }
     }
 
     override suspend fun getMedicalRecords(patientId: String): Result<List<MedicalRecordResponse>> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            val demoRecords = com.medislot.app.data.model.MockData.patientProfile.labReports.mapIndexed { idx, report ->
+                MedicalRecordResponse(
+                    id = "rec_demo_$idx",
+                    patient_id = patientId,
+                    title = report.testName,
+                    record_type = "Lab Report",
+                    date = report.date,
+                    file_url = "sample_report.pdf",
+                    result_summary = report.result,
+                    doctor_id = "doc_1"
+                )
+            }
+            return Result.success(demoRecords)
+        }
+
         return try {
             val response = RetrofitClient.apiService.getPatientMedicalRecords(patientId)
             Result.success(response)
         } catch (e: Exception) {
-            Result.success(emptyList())
+            Result.failure(e)
         }
     }
 
     override suspend fun addMedicalRecord(request: MedicalRecordRequest): Result<MedicalRecordResponse> {
-        return try {
-            val response = RetrofitClient.apiService.createMedicalRecord(request)
-            Result.success(response)
-        } catch (e: Exception) {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
             val mockResponse = MedicalRecordResponse(
-                id = "rec_mock_" + System.currentTimeMillis().hashCode(),
+                id = "rec_demo_" + System.currentTimeMillis().hashCode(),
                 patient_id = request.patient_id,
                 title = request.title,
                 record_type = request.record_type,
@@ -160,7 +175,14 @@ class PatientRepositoryImpl : PatientRepository {
                 result_summary = request.result_summary,
                 doctor_id = request.doctor_id
             )
-            Result.success(mockResponse)
+            return Result.success(mockResponse)
+        }
+
+        return try {
+            val response = RetrofitClient.apiService.createMedicalRecord(request)
+            Result.success(response)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 }

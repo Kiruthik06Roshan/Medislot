@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
@@ -80,6 +81,8 @@ import com.medislot.app.ui.screens.patient.HospitalNavigationScreen
 @Composable
 fun MediSlotApp() {
     val navController = rememberNavController()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
@@ -137,10 +140,36 @@ fun MediSlotApp() {
             // AUTH FLOW
             // ==========================================
             composable(Screen.Splash.route) {
+                val coroutineScope = rememberCoroutineScope()
                 SplashScreen(
                     onTimeout = {
-                        navController.navigate(Screen.Onboarding.route) {
-                            popUpTo(Screen.Splash.route) { inclusive = true }
+                        coroutineScope.launch {
+                            val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                            val isLoggedIn = authRepo.isLoggedIn()
+                            val savedRole = authRepo.getRole()
+                            if (isLoggedIn && !savedRole.isNullOrEmpty()) {
+                                com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = false
+                                activeRole = when (savedRole) {
+                                    "patient" -> UserRole.PATIENT
+                                    "doctor" -> UserRole.DOCTOR
+                                    "hospital", "hospital_coordinator" -> UserRole.HOSPITAL
+                                    else -> null
+                                }
+                                val targetRoute = when (savedRole) {
+                                    "patient" -> Screen.PatientHome.route
+                                    "doctor" -> Screen.DoctorHome.route
+                                    "hospital", "hospital_coordinator" -> Screen.HospitalHome.route
+                                    "super_admin" -> Screen.SuperAdminDashboard.route
+                                    else -> Screen.Onboarding.route
+                                }
+                                navController.navigate(targetRoute) {
+                                    popUpTo(Screen.Splash.route) { inclusive = true }
+                                }
+                            } else {
+                                navController.navigate(Screen.Onboarding.route) {
+                                    popUpTo(Screen.Splash.route) { inclusive = true }
+                                }
+                            }
                         }
                     }
                 )
@@ -162,36 +191,79 @@ fun MediSlotApp() {
                 LoginScreen(
                     role = role,
                     onLoginSuccess = { username ->
-                        val currentStatus = com.medislot.app.data.model.VerificationStateStore.userVerificationStatus[username] ?: com.medislot.app.data.model.VerificationStatus.PENDING
-                        val isApproved = currentStatus == com.medislot.app.data.model.VerificationStatus.APPROVED
+                        val isDemoMode = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+                        if (isDemoMode) {
+                            val currentStatus = com.medislot.app.data.model.VerificationStateStore.userVerificationStatus[username] ?: com.medislot.app.data.model.VerificationStatus.PENDING
+                            val isApproved = currentStatus == com.medislot.app.data.model.VerificationStatus.APPROVED
 
-                        if (role == "super_admin") {
-                            activeRole = null
-                            navController.navigate(Screen.SuperAdminDashboard.route) {
-                                popUpTo(Screen.RoleSelection.route) { inclusive = true }
-                            }
-                        } else if (role == "patient" || isApproved) {
-                            activeRole = when (role) {
-                                "patient" -> UserRole.PATIENT
-                                "doctor" -> UserRole.DOCTOR
-                                "hospital" -> UserRole.HOSPITAL
-                                else -> UserRole.PATIENT
-                            }
-                            val homeRoute = when (role) {
-                                "patient" -> Screen.PatientHome.route
-                                "doctor" -> Screen.DoctorHome.route
-                                "hospital" -> Screen.HospitalHome.route
-                                else -> Screen.PatientHome.route
-                            }
-                            navController.navigate(homeRoute) {
-                                popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                            if (role == "super_admin") {
+                                activeRole = null
+                                navController.navigate(Screen.SuperAdminDashboard.route) {
+                                    popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                                }
+                            } else if (role == "patient" || isApproved) {
+                                activeRole = when (role) {
+                                    "patient" -> UserRole.PATIENT
+                                    "doctor" -> UserRole.DOCTOR
+                                    "hospital" -> UserRole.HOSPITAL
+                                    else -> UserRole.PATIENT
+                                }
+                                val homeRoute = when (role) {
+                                    "patient" -> Screen.PatientHome.route
+                                    "doctor" -> Screen.DoctorHome.route
+                                    "hospital" -> Screen.HospitalHome.route
+                                    else -> Screen.PatientHome.route
+                                }
+                                navController.navigate(homeRoute) {
+                                    popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                                }
+                            } else {
+                                // If doctor or hospital admin is not approved yet, redirect to status checking screen
+                                val hospitalSelection = if (role == "doctor") {
+                                    com.medislot.app.data.model.VerificationStateStore.doctorHospitalSelections[username] ?: "Apollo Hospital"
+                                } else "None"
+                                navController.navigate(Screen.VerificationStatus.createRoute(role, hospitalSelection))
                             }
                         } else {
-                            // If doctor or hospital admin is not approved yet, redirect to status checking screen
-                            val hospitalSelection = if (role == "doctor") {
-                                com.medislot.app.data.model.VerificationStateStore.doctorHospitalSelections[username] ?: "Apollo Hospital"
-                            } else "None"
-                            navController.navigate(Screen.VerificationStatus.createRoute(role, hospitalSelection))
+                            if (role == "super_admin") {
+                                activeRole = null
+                                navController.navigate(Screen.SuperAdminDashboard.route) {
+                                    popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                                }
+                            } else if (role == "patient") {
+                                activeRole = UserRole.PATIENT
+                                navController.navigate(Screen.PatientHome.route) {
+                                    popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                                }
+                            } else {
+                                coroutineScope.launch {
+                                    try {
+                                        val uid = com.medislot.app.data.local.DatabaseProvider.getDataStoreManager().uidFlow.first()
+                                        if (uid != null) {
+                                            val res = com.medislot.app.network.RetrofitClient.apiService.getUserStatus(uid)
+                                            if (res.status == "Approved") {
+                                                activeRole = when (role) {
+                                                    "doctor" -> UserRole.DOCTOR
+                                                    "hospital" -> UserRole.HOSPITAL
+                                                    else -> UserRole.PATIENT
+                                                }
+                                                val homeRoute = when (role) {
+                                                    "doctor" -> Screen.DoctorHome.route
+                                                    "hospital" -> Screen.HospitalHome.route
+                                                    else -> Screen.PatientHome.route
+                                                }
+                                                navController.navigate(homeRoute) {
+                                                    popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                                                }
+                                            } else {
+                                                navController.navigate(Screen.VerificationStatus.createRoute(role, res.hospital_name ?: "None"))
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        android.widget.Toast.makeText(context, "Failed to verify account status: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
                         }
                     },
                     onNavigateToRegister = {
@@ -201,6 +273,7 @@ fun MediSlotApp() {
                         navController.navigate(Screen.ForgotPassword.route)
                     },
                     onNavigateToSuperAdmin = {
+                        com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = false
                         navController.navigate(Screen.SuperAdminDashboard.route)
                     }
                 )
@@ -272,6 +345,17 @@ fun MediSlotApp() {
                 SuperAdminDashboardScreen(
                     onNavigateBack = {
                         navController.popBackStack()
+                    },
+                    onLogout = {
+                        coroutineScope.launch {
+                            val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                            authRepo.logout()
+                            com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = false
+                            com.medislot.app.data.model.VerificationStateStore.reset()
+                            navController.navigate(Screen.RoleSelection.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
                     }
                 )
             }
@@ -290,7 +374,15 @@ fun MediSlotApp() {
             composable(Screen.RoleSelection.route) {
                 RoleSelectionScreen(
                     onRoleSelected = { role ->
+                        com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = false
                         navController.navigate(Screen.Login.createRoute(role))
+                    },
+                    onNavigateToPatientDemo = {
+                        com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = true
+                        activeRole = UserRole.PATIENT
+                        navController.navigate(Screen.PatientHome.route) {
+                            popUpTo(Screen.RoleSelection.route) { inclusive = true }
+                        }
                     },
                     onNavigateToDoctorDemo = {
                         com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = true
@@ -457,6 +549,10 @@ fun MediSlotApp() {
                                                     contactNumber = response.contact,
                                                     averageConsultationTime = 12
                                                 )
+                                            com.medislot.app.ui.screens.doctor.DoctorWorkspaceState.activeSlots.clear()
+                                            com.medislot.app.ui.screens.doctor.DoctorWorkspaceState.activeSlots.addAll(
+                                                response.slot_times?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+                                            )
                                             
                                             // Fetch real queue/appointments
                                             val apptResult = docRepo.getAppointments(response.id)

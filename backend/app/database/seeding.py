@@ -12,19 +12,38 @@ import datetime
 from sqlalchemy import text
 
 async def seed_data(db: AsyncSession):
-    print("Clearing database tables for a fresh start...")
-    try:
-        await db.execute(text("TRUNCATE TABLE users, patients, doctors, hospitals, appointments, medical_records, staff_members, staff_schedules, leave_requests, doctor_applications, inventory, operational_alerts CASCADE"))
-        await db.commit()
-    except Exception as e:
-        print("Truncate failed (tables might not exist yet):", e)
-        await db.rollback()
+    print("Ensuring database columns exist...")
+    alter_queries = [
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS insurance_provider VARCHAR;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS insurance_plan VARCHAR;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS insurance_policy_number VARCHAR;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS insurance_expiry VARCHAR;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS emergency_contact_name VARCHAR;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS emergency_contact_phone VARCHAR;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS emergency_contact_relation VARCHAR;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_heart_rate INTEGER;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_bp VARCHAR;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_spo2 INTEGER;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_temperature FLOAT;",
+        "ALTER TABLE patients ADD COLUMN IF NOT EXISTS vitals_blood_sugar INTEGER;",
+        "ALTER TABLE staff_members ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+        "ALTER TABLE staff_schedules ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+        "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+        "ALTER TABLE inventory ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+        "ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;"
+    ]
+    for q in alter_queries:
+        try:
+            await db.execute(text(q))
+            await db.commit()
+        except Exception:
+            await db.rollback()
 
-    print("Seeding database with deterministic demo data...")
+    print("Checking database for seed data...")
     hashed_password = get_password_hash("Password123!")
 
-    # 1. Seed Users
-    users = [
+    # 1. Seed Users if not present
+    seed_users = [
         UserModel(uid="uid_patient_1", email="patient@medislot.com", password_hash=hashed_password, role="patient", full_name="John Doe"),
         UserModel(uid="uid_doc_1", email="john.doe@medislot.com", password_hash=hashed_password, role="doctor", full_name="Dr. John Doe"),
         UserModel(uid="uid_doc_2", email="helen.cho@medislot.com", password_hash=hashed_password, role="doctor", full_name="Dr. Helen Cho"),
@@ -32,43 +51,49 @@ async def seed_data(db: AsyncSession):
         UserModel(uid="uid_hosp_1", email="coordinator@medislot.com", password_hash=hashed_password, role="hospital_coordinator", full_name="City General Admin"),
         UserModel(uid="uid_super_1", email="admin@medislot.com", password_hash=hashed_password, role="super_admin", full_name="Super Admin")
     ]
-    for u in users:
-        db.add(u)
+    for u in seed_users:
+        res = await db.execute(select(UserModel).where(UserModel.uid == u.uid))
+        if not res.scalars().first():
+            db.add(u)
     await db.commit()
 
     # 2. Seed Patient
-    patient = PatientModel(
-        id="pat_1",
-        uid="uid_patient_1",
-        age=30,
-        gender="Male",
-        contact="+1 (555) 019-2834",
-        blood_group="O+",
-        height="178 cm",
-        weight="75 kg",
-        bmi="23.7",
-        allergies="Peanuts, Penicillin",
-        medications="Vitamin D3, Zyrtec",
-        medical_history="Mild Asthma (diagnosed 2018), Sprained Ankle (2022)"
-    )
-    db.add(patient)
+    res_pat = await db.execute(select(PatientModel).where(PatientModel.id == "pat_1"))
+    if not res_pat.scalars().first():
+        patient = PatientModel(
+            id="pat_1",
+            uid="uid_patient_1",
+            age=30,
+            gender="Male",
+            contact="+1 (555) 019-2834",
+            blood_group="O+",
+            height="178 cm",
+            weight="75 kg",
+            bmi="23.7",
+            allergies="Peanuts, Penicillin",
+            medications="Vitamin D3, Zyrtec",
+            medical_history="Mild Asthma (diagnosed 2018), Sprained Ankle (2022)"
+        )
+        db.add(patient)
 
     # 3. Seed Hospital
-    hospital = HospitalModel(
-        id="hosp_1",
-        name="City General Hospital",
-        uid="uid_hosp_1",
-        license_number="LIC-99283-GEN",
-        registration_number="REG-11029",
-        address="123 Main St, Metroville",
-        hospital_type="General",
-        departments="Cardiology,Neurology,ICU,Pediatrics,Emergency",
-        contact="+1 (555) 000-1111",
-        admin_name="Coordinator Admin",
-        status="Approved",
-        docs_attached="License_Doc.pdf"
-    )
-    db.add(hospital)
+    res_hosp = await db.execute(select(HospitalModel).where(HospitalModel.id == "hosp_1"))
+    if not res_hosp.scalars().first():
+        hospital = HospitalModel(
+            id="hosp_1",
+            name="City General Hospital",
+            uid="uid_hosp_1",
+            license_number="LIC-99283-GEN",
+            registration_number="REG-11029",
+            address="123 Main St, Metroville",
+            hospital_type="General",
+            departments="Cardiology,Neurology,ICU,Pediatrics,Emergency",
+            contact="+1 (555) 000-1111",
+            admin_name="Coordinator Admin",
+            status="Approved",
+            docs_attached="License_Doc.pdf"
+        )
+        db.add(hospital)
     await db.commit()
 
     # 4. Seed Doctors
@@ -132,7 +157,9 @@ async def seed_data(db: AsyncSession):
         )
     ]
     for d in doctors:
-        db.add(d)
+        res = await db.execute(select(DoctorModel).where(DoctorModel.id == d.id))
+        if not res.scalars().first():
+            db.add(d)
 
     # 5. Seed Appointments
     appointments = [
@@ -174,7 +201,9 @@ async def seed_data(db: AsyncSession):
         )
     ]
     for a in appointments:
-        db.add(a)
+        res = await db.execute(select(AppointmentModel).where(AppointmentModel.id == a.id))
+        if not res.scalars().first():
+            db.add(a)
 
     # 6. Seed Medical Records
     records = [
@@ -200,54 +229,66 @@ async def seed_data(db: AsyncSession):
         )
     ]
     for r in records:
-        db.add(r)
+        res = await db.execute(select(MedicalRecordModel).where(MedicalRecordModel.id == r.id))
+        if not res.scalars().first():
+            db.add(r)
 
     # 7. Seed Staff Members
     staff = [
-        StaffMemberModel(id="stf_1", name="Nurse Clara Barton", role="Nurse", department="Pediatrics", room="Room 1A", status="On Duty"),
-        StaffMemberModel(id="stf_2", name="Technician Marie Curie", role="Lab Technician", department="Cardiology", room="Room 2B", status="On Duty")
+        StaffMemberModel(id="stf_1", hospital_name="City General Hospital", name="Nurse Clara Barton", role="Nurse", department="Pediatrics", room="Room 1A", status="On Duty"),
+        StaffMemberModel(id="stf_2", hospital_name="City General Hospital", name="Technician Marie Curie", role="Lab Technician", department="Cardiology", room="Room 2B", status="On Duty")
     ]
     for s in staff:
-        db.add(s)
+        res = await db.execute(select(StaffMemberModel).where(StaffMemberModel.id == s.id))
+        if not res.scalars().first():
+            db.add(s)
 
     # 8. Seed Staff Schedules
     schedules = [
-        StaffScheduleModel(id="sch_1", name="Dr. John Doe", role="Doctor", department="Cardiology", date="Monday", shift_type="Morning", shift_time="08:00 AM - 12:00 PM", room="Room 2A", status="On Duty"),
-        StaffScheduleModel(id="sch_2", name="Dr. Helen Cho", role="Doctor", department="Neurology", date="Tuesday", shift_type="Afternoon", shift_time="12:00 PM - 04:00 PM", room="Room 3B", status="On Duty"),
-        StaffScheduleModel(id="sch_3", name="Nurse Clara Barton", role="Nurse", department="Pediatrics", date="Wednesday", shift_type="Night", shift_time="08:00 PM - 08:00 AM", room="Room 1A", status="On Duty"),
-        StaffScheduleModel(id="sch_4", name="Dr. Marcus Vance", role="Doctor", department="Orthopedics", date="Monday", shift_type="Morning", shift_time="08:00 AM - 12:00 PM", room="Room 1C", status="On Duty")
+        StaffScheduleModel(id="sch_1", hospital_name="City General Hospital", name="Dr. John Doe", role="Doctor", department="Cardiology", date="Monday", shift_type="Morning", shift_time="08:00 AM - 12:00 PM", room="Room 2A", status="On Duty"),
+        StaffScheduleModel(id="sch_2", hospital_name="City General Hospital", name="Dr. Helen Cho", role="Doctor", department="Neurology", date="Tuesday", shift_type="Afternoon", shift_time="12:00 PM - 04:00 PM", room="Room 3B", status="On Duty"),
+        StaffScheduleModel(id="sch_3", hospital_name="City General Hospital", name="Nurse Clara Barton", role="Nurse", department="Pediatrics", date="Wednesday", shift_type="Night", shift_time="08:00 PM - 08:00 AM", room="Room 1A", status="On Duty"),
+        StaffScheduleModel(id="sch_4", hospital_name="City General Hospital", name="Dr. Marcus Vance", role="Doctor", department="Orthopedics", date="Monday", shift_type="Morning", shift_time="08:00 AM - 12:00 PM", room="Room 1C", status="On Duty")
     ]
     for sc in schedules:
-        db.add(sc)
+        res = await db.execute(select(StaffScheduleModel).where(StaffScheduleModel.id == sc.id))
+        if not res.scalars().first():
+            db.add(sc)
 
     # 9. Seed Leave Requests
     leaves = [
-        LeaveRequestModel(id="lv_1", staff_id="stf_1", staff_name="Nurse Clara Barton", role="Nurse", department="Pediatrics", start_date="Aug 10", end_date="Aug 14", reason="Family emergency and personal travel.", status="Pending"),
-        LeaveRequestModel(id="lv_2", staff_id="doc_2", staff_name="Dr. Helen Cho", role="Doctor", department="Neurology", start_date="Aug 12", end_date="Aug 13", reason="Medical checkup appointment.", status="Pending")
+        LeaveRequestModel(id="lv_1", hospital_name="City General Hospital", staff_id="stf_1", staff_name="Nurse Clara Barton", role="Nurse", department="Pediatrics", start_date="Aug 10", end_date="Aug 14", reason="Family emergency and personal travel.", status="Pending"),
+        LeaveRequestModel(id="lv_2", hospital_name="City General Hospital", staff_id="doc_2", staff_name="Dr. Helen Cho", role="Doctor", department="Neurology", start_date="Aug 12", end_date="Aug 13", reason="Medical checkup appointment.", status="Pending")
     ]
     for l in leaves:
-        db.add(l)
+        res = await db.execute(select(LeaveRequestModel).where(LeaveRequestModel.id == l.id))
+        if not res.scalars().first():
+            db.add(l)
 
     # 10. Seed Inventory
     inventory = [
-        InventoryModel(id="inv_1", name="ICU Beds Available", total=50, available=12, unit="Beds", category="ICU", last_updated="Updated just now", trend="Decreasing", is_trend_positive=False),
-        InventoryModel(id="inv_2", name="Oxygen Concentrators", total=100, available=82, unit="Units", category="Gas", last_updated="Updated 2h ago", trend="Increasing", is_trend_positive=True),
-        InventoryModel(id="inv_3", name="O- Blood Bags", total=30, available=8, unit="Bags", category="Blood bank", last_updated="Updated just now", trend="Critical Low", is_trend_positive=False),
-        InventoryModel(id="inv_4", name="O+ Blood Bags", total=50, available=35, unit="Bags", category="Blood bank", last_updated="Updated 1h ago", trend="Stable", is_trend_positive=True),
-        InventoryModel(id="inv_5", name="Paracetamol 500mg", total=5000, available=4200, unit="Tablets", category="Medicines", last_updated="Updated 4h ago", trend="Stable", is_trend_positive=True),
-        InventoryModel(id="inv_6", name="Amoxicillin 250mg", total=1000, available=900, unit="Capsules", category="Medicines", last_updated="Updated just now", trend="Stable", is_trend_positive=True),
-        InventoryModel(id="inv_7", name="Disposable Syringes", total=2000, available=1850, unit="Units", category="Equipment", last_updated="Updated 5h ago", trend="Stable", is_trend_positive=True)
+        InventoryModel(id="inv_1", hospital_name="City General Hospital", name="ICU Beds Available", total=50, available=12, unit="Beds", category="ICU", last_updated="Updated just now", trend="Decreasing", is_trend_positive=False),
+        InventoryModel(id="inv_2", hospital_name="City General Hospital", name="Oxygen Concentrators", total=100, available=82, unit="Units", category="Gas", last_updated="Updated 2h ago", trend="Increasing", is_trend_positive=True),
+        InventoryModel(id="inv_3", hospital_name="City General Hospital", name="O- Blood Bags", total=30, available=8, unit="Bags", category="Blood bank", last_updated="Updated just now", trend="Critical Low", is_trend_positive=False),
+        InventoryModel(id="inv_4", hospital_name="City General Hospital", name="O+ Blood Bags", total=50, available=35, unit="Bags", category="Blood bank", last_updated="Updated 1h ago", trend="Stable", is_trend_positive=True),
+        InventoryModel(id="inv_5", hospital_name="City General Hospital", name="Paracetamol 500mg", total=5000, available=4200, unit="Tablets", category="Medicines", last_updated="Updated 4h ago", trend="Stable", is_trend_positive=True),
+        InventoryModel(id="inv_6", hospital_name="City General Hospital", name="Amoxicillin 250mg", total=1000, available=900, unit="Capsules", category="Medicines", last_updated="Updated just now", trend="Stable", is_trend_positive=True),
+        InventoryModel(id="inv_7", hospital_name="City General Hospital", name="Disposable Syringes", total=2000, available=1850, unit="Units", category="Equipment", last_updated="Updated 5h ago", trend="Stable", is_trend_positive=True)
     ]
     for i in inventory:
-        db.add(i)
+        res = await db.execute(select(InventoryModel).where(InventoryModel.id == i.id))
+        if not res.scalars().first():
+            db.add(i)
 
     # 11. Seed Operational Alerts
     alerts = [
-        OperationalAlertModel(id="al_1", title="Critical Low: O- Blood Bags", message="O- Blood bags have dropped below safety thresholds (8 bags left). Immediate replacement requested.", severity="Critical", timestamp="10 mins ago", department="Blood bank", is_resolved=False),
-        OperationalAlertModel(id="al_2", title="Staff Shortage - Pediatrics", message="Nurse Clara Barton approved leave leaves Pediatrics shift short on Wednesday night.", severity="High", timestamp="1 hr ago", department="Pediatrics", is_resolved=False)
+        OperationalAlertModel(id="al_1", hospital_name="City General Hospital", title="Critical Low: O- Blood Bags", message="O- Blood bags have dropped below safety thresholds (8 bags left). Immediate replacement requested.", severity="Critical", timestamp="10 mins ago", department="Blood bank", is_resolved=False),
+        OperationalAlertModel(id="al_2", hospital_name="City General Hospital", title="Staff Shortage - Pediatrics", message="Nurse Clara Barton approved leave leaves Pediatrics shift short on Wednesday night.", severity="High", timestamp="1 hr ago", department="Pediatrics", is_resolved=False)
     ]
     for al in alerts:
-        db.add(al)
+        res = await db.execute(select(OperationalAlertModel).where(OperationalAlertModel.id == al.id))
+        if not res.scalars().first():
+            db.add(al)
 
     await db.commit()
-    print("Database seeded successfully!")
+    print("Database check completed!")

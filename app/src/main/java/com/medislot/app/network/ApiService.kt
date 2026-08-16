@@ -14,6 +14,9 @@ interface ApiService {
     @POST("api/auth/refresh")
     suspend fun refresh(@Query("refresh_token") refreshToken: String): TokenResponse
 
+    @GET("api/auth/status/{uid}")
+    suspend fun getUserStatus(@Path("uid") uid: String): UserStatusResponse
+
 
     // --- PATIENTS ---
     @GET("api/patients/profile/{uid}")
@@ -63,8 +66,20 @@ interface ApiService {
         @Query("time") time: String
     ): AppointmentResponse
 
+    @PUT("api/appointments/{apt_id}/cancel")
+    suspend fun cancelAppointment(
+        @Path("apt_id") aptId: String
+    ): AppointmentResponse
+
+
 
     // --- HOSPITAL OPERATIONS ---
+    @GET("api/hospital/profile/{uid}")
+    suspend fun getHospitalProfile(@Path("uid") uid: String): HospitalResponse
+
+    @PUT("api/hospital/profile")
+    suspend fun updateHospitalProfile(@Body request: HospitalRegisterRequest): HospitalResponse
+
     @POST("api/hospital/register")
     suspend fun registerHospital(@Body request: HospitalRegisterRequest): HospitalResponse
 
@@ -112,11 +127,20 @@ interface ApiService {
     @POST("api/hospital/scheduling")
     suspend fun assignStaffShift(@Body request: StaffScheduleRequest): StaffScheduleResponse
 
+    @PUT("api/hospital/scheduling/{sch_id}")
+    suspend fun editStaffShift(
+        @Path("sch_id") schId: String,
+        @Body request: StaffScheduleRequest
+    ): StaffScheduleResponse
+
     @DELETE("api/hospital/scheduling/{sch_id}")
     suspend fun deleteStaffShift(@Path("sch_id") schId: String): Map<String, String>
 
     @POST("api/hospital/scheduling/duplicate")
     suspend fun duplicateScheduling(): Map<String, String>
+
+    @GET("api/hospital/staff")
+    suspend fun getStaffMembers(): List<StaffMemberResponse>
 
     @GET("api/hospital/leaves")
     suspend fun getLeaveRequests(): List<LeaveRequestResponse>

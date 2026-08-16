@@ -100,6 +100,7 @@ fun RegisterScreen(
     onRegisterSuccess: (role: String, hospitalName: String) -> Unit,
     onNavigateToLogin: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var currentStep by remember { mutableStateOf(1) }
     var isLoading by remember { mutableStateOf(false) }
@@ -439,58 +440,105 @@ fun RegisterScreen(
                         role = role
                     )
                     
-                    // Seed local/API verification status for simulation
-                    if (role == "doctor") {
-                        try {
-                            val registeredUid = result.getOrNull()?.uid
-                            com.medislot.app.network.RetrofitClient.apiService.createDoctorApplication(
-                                com.medislot.app.network.DoctorApplicationRequest(
-                                    uid = registeredUid,
+                    if (result.isFailure) {
+                        isLoading = false
+                        val errMsg = com.medislot.app.utils.NetworkErrorUtils.getReadableErrorMessage(result.exceptionOrNull())
+                        android.widget.Toast.makeText(context, errMsg, android.widget.Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+                    
+                    // Save profile details to backend & Room DB
+                    val registeredUid = result.getOrNull()?.uid ?: ""
+                    if (registeredUid.isNotEmpty()) {
+                        if (role == "patient") {
+                            try {
+                                val patRepo = com.medislot.app.data.repository.PatientRepositoryImpl()
+                                patRepo.updateProfile(
+                                    com.medislot.app.network.PatientProfileRequest(
+                                        uid = registeredUid,
+                                        age = if (patDob.length >= 4) (2026 - (patDob.takeLast(4).toIntOrNull() ?: 2000)) else 21,
+                                        gender = if (patGender.isBlank()) "Male" else patGender,
+                                        contact = if (patPhone.isBlank()) "+1 (555) 000-0000" else patPhone,
+                                        blood_group = if (patBloodGroup.isBlank()) "B+" else patBloodGroup,
+                                        height = if (patHeight.isBlank()) "175 cm" else patHeight,
+                                        weight = if (patWeight.isBlank()) "68 kg" else patWeight,
+                                        bmi = "22.2",
+                                        allergies = if (patAllergies.isEmpty()) "None" else patAllergies.joinToString(", "),
+                                        medications = if (patCurrentMedications.isBlank()) "None" else patCurrentMedications,
+                                        medical_history = if (patMedicalHistory.isEmpty()) "None" else patMedicalHistory.joinToString(", ")
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                // Silent fail fallback to Room
+                            }
+                        } else if (role == "doctor") {
+                            try {
+                                val docRepo = com.medislot.app.data.repository.DoctorRepositoryImpl()
+                                docRepo.updateProfile(
+                                    com.medislot.app.network.DoctorProfileRequest(
+                                        uid = registeredUid,
+                                        specialization = docSpecialization,
+                                        hospital_name = docHospitalName,
+                                        experience_years = docExperience.toIntOrNull() ?: 5,
+                                        contact = if (docPhone.isBlank()) "+1 (555) 000-0000" else docPhone,
+                                        mbbs_institution = docMbbsInstitution,
+                                        registration_number = docRegistrationNumber
+                                    )
+                                )
+                                com.medislot.app.network.RetrofitClient.apiService.createDoctorApplication(
+                                    com.medislot.app.network.DoctorApplicationRequest(
+                                        uid = registeredUid,
+                                        name = docName,
+                                        specialization = docSpecialization,
+                                        experience_years = docExperience,
+                                        medical_registration_number = docRegistrationNumber,
+                                        mbbs_institution = docMbbsInstitution,
+                                        docs_attached = "MBBS_Degree.pdf",
+                                        resume_file = "resume.pdf",
+                                        selected_hospital = docHospitalName
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                // Fallback
+                            }
+                            if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                                com.medislot.app.data.model.VerificationStateStore.addDoctorApplication(
                                     name = docName,
-                                    specialization = docSpecialization,
-                                    experience_years = docExperience,
-                                    medical_registration_number = docRegistrationNumber,
-                                    mbbs_institution = docMbbsInstitution,
-                                    docs_attached = "MBBS_Degree.pdf",
-                                    resume_file = "resume.pdf",
-                                    selected_hospital = docHospitalName
+                                    spec = docSpecialization,
+                                    hospital = docHospitalName,
+                                    exp = docExperience,
+                                    filename = "MBBS_Degree.pdf"
                                 )
-                            )
-                        } catch (e: Exception) {
-                            // Fallback
-                        }
-                        com.medislot.app.data.model.VerificationStateStore.addDoctorApplication(
-                            name = docName,
-                            spec = docSpecialization,
-                            hospital = docHospitalName,
-                            exp = docExperience,
-                            filename = "MBBS_Degree.pdf"
-                        )
-                    } else if (role == "hospital") {
-                        try {
-                            val registeredUid = result.getOrNull()?.uid ?: ""
-                            com.medislot.app.network.RetrofitClient.apiService.registerHospital(
-                                com.medislot.app.network.HospitalRegisterRequest(
+                            }
+                        } else if (role == "hospital") {
+                            try {
+                                com.medislot.app.network.RetrofitClient.apiService.registerHospital(
+                                    com.medislot.app.network.HospitalRegisterRequest(
+                                        name = hospName,
+                                        uid = registeredUid,
+                                        license_number = hospLicenseNumber,
+                                        registration_number = hospRegistrationNumber,
+                                        address = "$hospAddress, $hospCity, $hospState - $hospPinCode",
+                                        hospital_type = hospType,
+                                        departments = "General,Emergency,ICU",
+                                        contact = hospOfficialPhone,
+                                        admin_name = adminName,
+                                        docs_attached = "License_Doc.pdf"
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                // Fallback
+                            }
+                            if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                                com.medislot.app.data.model.VerificationStateStore.addHospitalApplication(
                                     name = hospName,
-                                    uid = registeredUid,
-                                    license_number = hospLicenseNumber,
-                                    registration_number = hospRegistrationNumber,
-                                    address = "$hospAddress, $hospCity, $hospState - $hospPinCode",
-                                    hospital_type = hospType,
-                                    departments = "General,Emergency,ICU",
-                                    contact = hospOfficialPhone,
-                                    admin_name = adminName,
-                                    docs_attached = "License_Doc.pdf"
+                                    regNum = hospRegistrationNumber,
+                                    license = hospLicenseNumber,
+                                    adminName = adminName,
+                                    contact = hospOfficialPhone
                                 )
-                            )
-                        } catch (e: Exception) {
-                            // Fallback
+                            }
                         }
-                        com.medislot.app.data.model.VerificationStateStore.addHospitalApplication(
-                            name = hospName,
-                            regNum = hospRegistrationNumber,
-                            license = hospLicenseNumber
-                        )
                     }
                     
                     isLoading = false

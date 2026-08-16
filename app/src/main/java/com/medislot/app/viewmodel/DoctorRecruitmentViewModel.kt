@@ -53,6 +53,31 @@ class DoctorRecruitmentViewModel(application: Application) : AndroidViewModel(ap
     private val _uiState = MutableStateFlow<AiState<Unit>>(AiState.Idle)
     val uiState = _uiState.asStateFlow()
 
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    init {
+        loadApplications()
+    }
+
+    fun loadApplications() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            repository.getApplications()
+                .onSuccess {
+                    // Automatically updated in Flow
+                }
+                .onFailure {
+                    _errorMessage.value = it.localizedMessage ?: "Failed to load doctor applications"
+                }
+            _isLoading.value = false
+        }
+    }
+
     // Filtered applications flow
     val filteredApplications: StateFlow<List<DoctorApplication>> = combine(
         repository.applications,

@@ -21,16 +21,28 @@ class UserRegister(BaseModel):
 
 class PatientRegister(BaseModel):
     uid: str
-    age: int
-    gender: str
-    contact: str
-    blood_group: str
-    height: str
-    weight: str
-    bmi: str
+    age: Optional[int] = 0
+    gender: Optional[str] = ""
+    contact: Optional[str] = ""
+    blood_group: Optional[str] = ""
+    height: Optional[str] = ""
+    weight: Optional[str] = ""
+    bmi: Optional[str] = ""
     allergies: Optional[str] = None
     medications: Optional[str] = None
     medical_history: Optional[str] = None
+    insurance_provider: Optional[str] = None
+    insurance_plan: Optional[str] = None
+    insurance_policy_number: Optional[str] = None
+    insurance_expiry: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relation: Optional[str] = None
+    vitals_heart_rate: Optional[int] = None
+    vitals_bp: Optional[str] = None
+    vitals_spo2: Optional[int] = None
+    vitals_temperature: Optional[float] = None
+    vitals_blood_sugar: Optional[int] = None
 
 class PatientResponse(BaseModel):
     id: str
@@ -42,9 +54,21 @@ class PatientResponse(BaseModel):
     height: str
     weight: str
     bmi: str
-    allergies: Optional[str]
-    medications: Optional[str]
-    medical_history: Optional[str]
+    allergies: Optional[str] = None
+    medications: Optional[str] = None
+    medical_history: Optional[str] = None
+    insurance_provider: Optional[str] = None
+    insurance_plan: Optional[str] = None
+    insurance_policy_number: Optional[str] = None
+    insurance_expiry: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relation: Optional[str] = None
+    vitals_heart_rate: Optional[int] = None
+    vitals_bp: Optional[str] = None
+    vitals_spo2: Optional[int] = None
+    vitals_temperature: Optional[float] = None
+    vitals_blood_sugar: Optional[int] = None
     class Config:
         orm_mode = True
 
@@ -56,6 +80,7 @@ class DoctorRegister(BaseModel):
     contact: str
     mbbs_institution: str
     registration_number: str
+    slot_times: Optional[str] = None
 
 class DoctorResponse(BaseModel):
     id: str
@@ -98,6 +123,7 @@ class AppointmentResponse(BaseModel):
     time: str
     status: str
     queue_number: int
+    patient_name: Optional[str] = None
     class Config:
         orm_mode = True
 
@@ -184,6 +210,7 @@ class LeaveRequestResponse(BaseModel):
         orm_mode = True
 
 class DoctorApplicationCreate(BaseModel):
+    uid: Optional[str] = None
     name: str
     specialization: str
     experience_years: str
@@ -195,6 +222,7 @@ class DoctorApplicationCreate(BaseModel):
 
 class DoctorApplicationResponse(BaseModel):
     id: str
+    uid: Optional[str] = None
     name: str
     specialization: str
     experience_years: str

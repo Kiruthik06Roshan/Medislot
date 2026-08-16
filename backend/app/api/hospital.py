@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from typing import List
+from typing import List, Optional
 import uuid
 
 from ..database.connection import get_db
@@ -13,20 +13,48 @@ from ..database.models import (
 from ..database.schemas import (
     InventoryItemResponse, OperationalAlertResponse, DoctorApplicationResponse,
     StaffScheduleResponse, StaffScheduleCreate, LeaveRequestResponse, DoctorApplicationCreate,
-    HospitalRegister, HospitalResponse
+    HospitalRegister, HospitalResponse, StaffMemberResponse
 )
+from ..utils.security import get_current_user
 
 router = APIRouter(prefix="/api/hospital", tags=["Hospital Operations"])
 
 # --- HOSPITAL REGISTRATION & SUPER ADMIN VERIFICATION ---
 @router.post("/register", response_model=HospitalResponse)
-async def register_hospital(payload: HospitalRegister, db: AsyncSession = Depends(get_db)):
-    # Check if registration number already exists
+async def register_hospital(
+    payload: HospitalRegister,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if current_user.get("role") not in ["hospital", "hospital_coordinator"]:
+        raise HTTPException(status_code=403, detail="Hospital coordinator role required.")
+    # Check if registration number already exists (excluding current user's profile if updating)
     query = select(HospitalModel).where(HospitalModel.registration_number == payload.registration_number)
     res = await db.execute(query)
-    existing = res.scalars().first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Hospital registration number already registered.")
+    existing = res.scalars().all()
+    for e in existing:
+        if e.uid != payload.uid:
+            raise HTTPException(status_code=400, detail="Hospital registration number already registered.")
+            
+    # Check if we already have a profile for this coordinator uid
+    u_query = select(HospitalModel).where(HospitalModel.uid == payload.uid)
+    u_res = await db.execute(u_query)
+    existing_hosp = u_res.scalars().first()
+    
+    if existing_hosp:
+        existing_hosp.name = payload.name
+        existing_hosp.license_number = payload.license_number
+        existing_hosp.registration_number = payload.registration_number
+        existing_hosp.address = payload.address
+        existing_hosp.hospital_type = payload.hospital_type
+        existing_hosp.departments = payload.departments
+        existing_hosp.contact = payload.contact
+        existing_hosp.admin_name = payload.admin_name
+        existing_hosp.docs_attached = payload.docs_attached
+        existing_hosp.status = "Pending"
+        await db.commit()
+        await db.refresh(existing_hosp)
+        return existing_hosp
         
     hospital = HospitalModel(
         id="hosp_" + str(uuid.uuid4())[:8],
@@ -48,55 +76,154 @@ async def register_hospital(payload: HospitalRegister, db: AsyncSession = Depend
     return hospital
 
 @router.get("/all", response_model=List[HospitalResponse])
-async def get_all_hospitals(db: AsyncSession = Depends(get_db)):
+async def get_all_hospitals(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if current_user.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Super Admin role required.")
     query = select(HospitalModel)
     res = await db.execute(query)
     return res.scalars().all()
 
 @router.post("/{hosp_id}/status", response_model=HospitalResponse)
-async def update_hospital_status(hosp_id: str, status: str, rejection_reason: str = None, db: AsyncSession = Depends(get_db)):
+async def update_hospital_status(
+    hosp_id: str,
+    status: str,
+    rejection_reason: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if current_user.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Super Admin role required.")
     query = select(HospitalModel).where(HospitalModel.id == hosp_id)
     res = await db.execute(query)
     hospital = res.scalars().first()
     if not hospital:
         raise HTTPException(status_code=404, detail="Hospital not found")
-        
     hospital.status = status
     if rejection_reason:
         hospital.rejection_reason = rejection_reason
-        
+    await db.commit()
+    await db.refresh(hospital)
+    return hospital
+
+@router.get("/profile/{uid}", response_model=HospitalResponse)
+async def get_hospital_profile(uid: str, db: AsyncSession = Depends(get_db)):
+    query = select(HospitalModel).where(HospitalModel.uid == uid)
+    res = await db.execute(query)
+    hospital = res.scalars().first()
+    if not hospital:
+        u_query = select(UserModel).where(UserModel.uid == uid)
+        u_res = await db.execute(u_query)
+        user = u_res.scalars().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Hospital account not found")
+        hospital = HospitalModel(
+            id="hosp_" + str(uuid.uuid4())[:8],
+            name=user.full_name,
+            uid=uid,
+            license_number="LIC-PENDING",
+            registration_number="REG-" + str(uuid.uuid4())[:6],
+            address="Address pending update",
+            hospital_type="General",
+            departments="General, Emergency",
+            contact="+1 (555) 000-0000",
+            admin_name=user.full_name,
+            status="Pending"
+        )
+        db.add(hospital)
+        await db.commit()
+        await db.refresh(hospital)
+    return hospital
+
+@router.put("/profile", response_model=HospitalResponse)
+async def update_hospital_profile(payload: HospitalRegister, db: AsyncSession = Depends(get_db)):
+    query = select(HospitalModel).where(HospitalModel.uid == payload.uid)
+    res = await db.execute(query)
+    hospital = res.scalars().first()
+    if not hospital:
+        hospital = HospitalModel(
+            id="hosp_" + str(uuid.uuid4())[:8],
+            uid=payload.uid,
+            name=payload.name,
+            license_number=payload.license_number,
+            registration_number=payload.registration_number,
+            address=payload.address,
+            hospital_type=payload.hospital_type,
+            departments=payload.departments,
+            contact=payload.contact,
+            admin_name=payload.admin_name,
+            docs_attached=payload.docs_attached,
+            status="Pending"
+        )
+        db.add(hospital)
+    else:
+        hospital.name = payload.name
+        hospital.license_number = payload.license_number
+        hospital.registration_number = payload.registration_number
+        hospital.address = payload.address
+        hospital.hospital_type = payload.hospital_type
+        hospital.departments = payload.departments
+        hospital.contact = payload.contact
+        hospital.admin_name = payload.admin_name
+        if payload.docs_attached:
+            hospital.docs_attached = payload.docs_attached
+
     await db.commit()
     await db.refresh(hospital)
     return hospital
 
 
+
 # --- RESOURCES & INVENTORY ---
 @router.get("/inventory", response_model=List[InventoryItemResponse])
-async def get_inventory(db: AsyncSession = Depends(get_db)):
-    query = select(InventoryModel)
+async def get_inventory(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role in ["hospital", "hospital_coordinator"]:
+        h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+        h_res = await db.execute(h_query)
+        hospital = h_res.scalars().first()
+        if not hospital:
+            return []
+        query = select(InventoryModel).where(InventoryModel.hospital_name == hospital.name)
+    else:
+        query = select(InventoryModel)
     result = await db.execute(query)
     items = result.scalars().all()
-    if not items:
-        # Seed initial resource metrics
+    if not items and (role not in ["hospital", "hospital_coordinator"] or hospital.name == "City General Hospital"):
+        # Seed initial resource metrics (only for City General Hospital by default if empty)
         seed = [
-            InventoryModel(id="inv_1", name="ICU Beds Available", total=20, available=8, unit="Beds", category="ICU"),
-            InventoryModel(id="inv_2", name="Ward Beds Available", total=150, available=45, unit="Beds", category="Beds"),
-            InventoryModel(id="inv_3", name="Oxygen Reserves", total=1000, available=720, unit="Liters", category="Gas"),
-            InventoryModel(id="inv_4", name="Emergency Ambulances", total=12, available=4, unit="Ambulances", category="Ambulances"),
-            InventoryModel(id="inv_5", name="O-Negative Blood Units", total=50, available=15, unit="Bags", category="Blood"),
-            InventoryModel(id="inv_6", name="Paracetamol 500mg", total=5000, available=1200, unit="Tablets", category="Medicine"),
-            InventoryModel(id="inv_7", name="Defibrillators Active", total=15, available=12, unit="Units", category="Equipment")
+            InventoryModel(id="inv_1", hospital_name="City General Hospital", name="ICU Beds Available", total=20, available=8, unit="Beds", category="ICU"),
+            InventoryModel(id="inv_2", hospital_name="City General Hospital", name="Ward Beds Available", total=150, available=45, unit="Beds", category="Beds"),
+            InventoryModel(id="inv_3", hospital_name="City General Hospital", name="Oxygen Reserves", total=1000, available=720, unit="Liters", category="Gas"),
+            InventoryModel(id="inv_4", hospital_name="City General Hospital", name="Emergency Ambulances", total=12, available=4, unit="Ambulances", category="Ambulances"),
+            InventoryModel(id="inv_5", hospital_name="City General Hospital", name="O-Negative Blood Units", total=50, available=15, unit="Bags", category="Blood"),
+            InventoryModel(id="inv_6", hospital_name="City General Hospital", name="Paracetamol 500mg", total=5000, available=1200, unit="Tablets", category="Medicine"),
+            InventoryModel(id="inv_7", hospital_name="City General Hospital", name="Defibrillators Active", total=15, available=12, unit="Units", category="Equipment")
         ]
         for item in seed:
             db.add(item)
         await db.commit()
-        query = select(InventoryModel)
+        if role in ["hospital", "hospital_coordinator"]:
+            query = select(InventoryModel).where(InventoryModel.hospital_name == hospital.name)
+        else:
+            query = select(InventoryModel)
         result = await db.execute(query)
         items = result.scalars().all()
     return items
 
 @router.put("/inventory/{item_id}", response_model=InventoryItemResponse)
-async def update_inventory_levels(item_id: str, available: int, db: AsyncSession = Depends(get_db)):
+async def update_inventory_levels(
+    item_id: str,
+    available: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     query = select(InventoryModel).where(InventoryModel.id == item_id)
     result = await db.execute(query)
     item = result.scalars().first()
@@ -110,21 +237,43 @@ async def update_inventory_levels(item_id: str, available: int, db: AsyncSession
 
 # --- OPERATIONAL ALERTS ---
 @router.get("/alerts", response_model=List[OperationalAlertResponse])
-async def get_alerts(db: AsyncSession = Depends(get_db)):
-    query = select(OperationalAlertModel).where(OperationalAlertModel.is_resolved == False)
+async def get_alerts(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role in ["hospital", "hospital_coordinator"]:
+        h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+        h_res = await db.execute(h_query)
+        hospital = h_res.scalars().first()
+        if not hospital:
+            return []
+        query = select(OperationalAlertModel).where(
+            (OperationalAlertModel.is_resolved == False) &
+            (OperationalAlertModel.hospital_name == hospital.name)
+        )
+    else:
+        query = select(OperationalAlertModel).where(OperationalAlertModel.is_resolved == False)
     result = await db.execute(query)
     alerts = result.scalars().all()
-    if not alerts:
-        # Seed initial active operational alerts
+    if not alerts and (role not in ["hospital", "hospital_coordinator"] or hospital.name == "City General Hospital"):
+        # Seed initial active operational alerts (only for City General Hospital by default)
         seed = [
-            OperationalAlertModel(id="alt_1", title="Low Oxygen Level Warning", message="Oxygen reserves dropped below 30% safety threshold.", severity="Critical", timestamp="10 mins ago", department="ICU"),
-            OperationalAlertModel(id="alt_2", title="OPD Patient Overload", message="Waiting time in General Medicine exceeds 60 minutes.", severity="Medium", timestamp="25 mins ago", department="Outpatient"),
-            OperationalAlertModel(id="alt_3", title="Defibrillator Maintenance", message="Defibrillator in ER Room 3 needs hardware diagnostics.", severity="High", timestamp="1 hour ago", department="ER")
+            OperationalAlertModel(id="alt_1", hospital_name="City General Hospital", title="Low Oxygen Level Warning", message="Oxygen reserves dropped below 30% safety threshold.", severity="Critical", timestamp="10 mins ago", department="ICU"),
+            OperationalAlertModel(id="alt_2", hospital_name="City General Hospital", title="OPD Patient Overload", message="Waiting time in General Medicine exceeds 60 minutes.", severity="Medium", timestamp="25 mins ago", department="Outpatient"),
+            OperationalAlertModel(id="alt_3", hospital_name="City General Hospital", title="Defibrillator Maintenance", message="Defibrillator in ER Room 3 needs hardware diagnostics.", severity="High", timestamp="1 hour ago", department="ER")
         ]
         for a in seed:
             db.add(a)
         await db.commit()
-        query = select(OperationalAlertModel).where(OperationalAlertModel.is_resolved == False)
+        if role in ["hospital", "hospital_coordinator"]:
+            query = select(OperationalAlertModel).where(
+                (OperationalAlertModel.is_resolved == False) &
+                (OperationalAlertModel.hospital_name == hospital.name)
+            )
+        else:
+            query = select(OperationalAlertModel).where(OperationalAlertModel.is_resolved == False)
         result = await db.execute(query)
         alerts = result.scalars().all()
     return alerts
@@ -144,27 +293,37 @@ async def resolve_alert(alert_id: str, db: AsyncSession = Depends(get_db)):
 
 # --- DOCTOR RECRUITMENT & VERIFICATION ---
 @router.get("/recruitment", response_model=List[DoctorApplicationResponse])
-async def get_recruitment_applications(db: AsyncSession = Depends(get_db)):
-    query = select(DoctorApplicationModel)
+async def get_recruitment_applications(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role not in ["hospital", "hospital_coordinator"]:
+        raise HTTPException(status_code=403, detail="Unauthorized role.")
+        
+    h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+    h_res = await db.execute(h_query)
+    hospital = h_res.scalars().first()
+    if not hospital:
+        return []
+    query = select(DoctorApplicationModel).where(DoctorApplicationModel.selected_hospital == hospital.name)
     result = await db.execute(query)
     apps = result.scalars().all()
-    if not apps:
-        seed = [
-            DoctorApplicationModel(id="app_1", name="Dr. Jane Smith", specialization="Pediatrics", experience_years="8", medical_registration_number="MC-8872", mbbs_institution="Harvard Medical School", selected_hospital="City General Hospital", status="Pending"),
-            DoctorApplicationModel(id="app_2", name="Dr. Charles Xavier", specialization="Neurology", experience_years="15", medical_registration_number="MC-1102", mbbs_institution="Oxford University", selected_hospital="Metro Health Medical Center", status="Pending")
-        ]
-        for a in seed:
-            db.add(a)
-        await db.commit()
-        query = select(DoctorApplicationModel)
-        result = await db.execute(query)
-        apps = result.scalars().all()
     return apps
 
 @router.post("/recruitment", response_model=DoctorApplicationResponse)
-async def create_doctor_application(payload: DoctorApplicationCreate, db: AsyncSession = Depends(get_db)):
+async def create_doctor_application(
+    payload: DoctorApplicationCreate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if current_user.get("role") != "doctor" or current_user.get("sub") != payload.uid:
+         raise HTTPException(status_code=403, detail="Unauthorized to create application.")
+         
     app = DoctorApplicationModel(
         id="app_" + str(uuid.uuid4())[:8],
+        uid=payload.uid,
         name=payload.name,
         specialization=payload.specialization,
         experience_years=payload.experience_years,
@@ -181,13 +340,31 @@ async def create_doctor_application(payload: DoctorApplicationCreate, db: AsyncS
     return app
 
 @router.post("/recruitment/{app_id}/status", response_model=DoctorApplicationResponse)
-async def update_application_status(app_id: str, status: str, rejection_reason: str = None, db: AsyncSession = Depends(get_db)):
+async def update_application_status(
+    app_id: str,
+    status: str,
+    rejection_reason: str = None,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role not in ["hospital", "hospital_coordinator"]:
+        raise HTTPException(status_code=403, detail="Hospital coordinator role required.")
+        
     query = select(DoctorApplicationModel).where(DoctorApplicationModel.id == app_id)
     result = await db.execute(query)
     app = result.scalars().first()
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
-    
+        
+    # Verify that this coordinator actually manages the hospital the doctor applied to
+    h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+    h_res = await db.execute(h_query)
+    hospital = h_res.scalars().first()
+    if not hospital or hospital.name != app.selected_hospital:
+        raise HTTPException(status_code=403, detail="Unauthorized to manage applications for this hospital.")
+        
     app.status = status
     if rejection_reason:
         app.rejection_reason = rejection_reason
@@ -199,7 +376,7 @@ async def update_application_status(app_id: str, status: str, rejection_reason: 
         user_res = await db.execute(user_query)
         user = user_res.scalars().first()
         
-        doc_uid = user.uid if user else ("uid_" + app.id)
+        doc_uid = user.uid if user else app.uid if app.uid else ("uid_" + app.id)
         doc_query = select(DoctorModel).where(DoctorModel.uid == doc_uid)
         doc_res = await db.execute(doc_query)
         existing_doc = doc_res.scalars().first()
@@ -223,10 +400,12 @@ async def update_application_status(app_id: str, status: str, rejection_reason: 
             # Register in staff scheduling as a member
             staff = StaffMemberModel(
                 id="stf_" + app.id,
+                hospital_name=app.selected_hospital,
                 name=app.name,
                 role="Doctor",
                 department=app.specialization,
-                room="Room 3C"
+                room="Room 3C",
+                status="On Duty"
             )
             db.add(staff)
 
@@ -235,32 +414,101 @@ async def update_application_status(app_id: str, status: str, rejection_reason: 
     return app
 
 
-# --- STAFF SCHEDULING ---
-@router.get("/scheduling", response_model=List[StaffScheduleResponse])
-async def get_staff_scheduling(db: AsyncSession = Depends(get_db)):
-    query = select(StaffScheduleModel)
+@router.get("/staff", response_model=List[StaffMemberResponse])
+async def get_staff_members(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role in ["hospital", "hospital_coordinator"]:
+        h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+        h_res = await db.execute(h_query)
+        hospital = h_res.scalars().first()
+        if not hospital:
+            return []
+        query = select(StaffMemberModel).where(StaffMemberModel.hospital_name == hospital.name)
+    else:
+        query = select(StaffMemberModel)
+        
     result = await db.execute(query)
-    schedules = result.scalars().all()
-    if not schedules:
-        # Seed initial weekly staff schedule
+    staff = result.scalars().all()
+    
+    if not staff and (role not in ["hospital", "hospital_coordinator"] or (hospital and hospital.name == "City General Hospital")):
+        # Seed initial staff members (only for City General Hospital by default)
         seed = [
-            StaffScheduleModel(id="sch_1", name="Dr. John Doe", role="Doctor", department="Cardiology", date="Monday", shift_type="Morning", shift_time="07:00 AM - 01:00 PM", room="Room 4B"),
-            StaffScheduleModel(id="sch_2", name="Dr. Helen Cho", role="Doctor", department="Neurology", date="Monday", shift_type="Afternoon", shift_time="01:00 PM - 07:00 PM", room="Room 2A"),
-            StaffScheduleModel(id="sch_3", name="Nurse Chloe Bennett", role="Nurse", department="Emergency", date="Monday", shift_type="Morning", shift_time="07:00 AM - 01:00 PM", room="ER Wing A"),
-            StaffScheduleModel(id="sch_4", name="Nurse Sarah Connor", role="Nurse", department="ICU", date="Monday", shift_type="Night", shift_time="07:00 PM - 07:00 AM", room="ICU Desk")
+            StaffMemberModel(id="stf_1", hospital_name="City General Hospital", name="Nurse Clara Barton", role="Nurse", department="Pediatrics", room="Room 1A", status="On Duty"),
+            StaffMemberModel(id="stf_2", hospital_name="City General Hospital", name="Technician Marie Curie", role="Lab Technician", department="Cardiology", room="Room 2B", status="On Duty")
         ]
         for s in seed:
             db.add(s)
         await db.commit()
+        if role in ["hospital", "hospital_coordinator"]:
+            query = select(StaffMemberModel).where(StaffMemberModel.hospital_name == hospital.name)
+        else:
+            query = select(StaffMemberModel)
+        result = await db.execute(query)
+        staff = result.scalars().all()
+    return staff
+
+
+# --- STAFF SCHEDULING ---
+@router.get("/scheduling", response_model=List[StaffScheduleResponse])
+async def get_staff_scheduling(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role in ["hospital", "hospital_coordinator"]:
+        h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+        h_res = await db.execute(h_query)
+        hospital = h_res.scalars().first()
+        if not hospital:
+            return []
+        query = select(StaffScheduleModel).where(StaffScheduleModel.hospital_name == hospital.name)
+    else:
         query = select(StaffScheduleModel)
+    result = await db.execute(query)
+    schedules = result.scalars().all()
+    if not schedules and (role not in ["hospital", "hospital_coordinator"] or hospital.name == "City General Hospital"):
+        # Seed initial weekly staff schedule (only for City General Hospital by default)
+        seed = [
+            StaffScheduleModel(id="sch_1", hospital_name="City General Hospital", name="Dr. John Doe", role="Doctor", department="Cardiology", date="Monday", shift_type="Morning", shift_time="07:00 AM - 01:00 PM", room="Room 4B"),
+            StaffScheduleModel(id="sch_2", hospital_name="City General Hospital", name="Dr. Helen Cho", role="Doctor", department="Neurology", date="Monday", shift_type="Afternoon", shift_time="01:00 PM - 07:00 PM", room="Room 2A"),
+            StaffScheduleModel(id="sch_3", hospital_name="City General Hospital", name="Nurse Chloe Bennett", role="Nurse", department="Emergency", date="Monday", shift_type="Morning", shift_time="07:00 AM - 01:00 PM", room="ER Wing A"),
+            StaffScheduleModel(id="sch_4", hospital_name="City General Hospital", name="Nurse Sarah Connor", role="Nurse", department="ICU", date="Monday", shift_type="Night", shift_time="07:00 PM - 07:00 AM", room="ICU Desk")
+        ]
+        for s in seed:
+            db.add(s)
+        await db.commit()
+        if role in ["hospital", "hospital_coordinator"]:
+            query = select(StaffScheduleModel).where(StaffScheduleModel.hospital_name == hospital.name)
+        else:
+            query = select(StaffScheduleModel)
         result = await db.execute(query)
         schedules = result.scalars().all()
     return schedules
 
 @router.post("/scheduling", response_model=StaffScheduleResponse)
-async def assign_staff_shift(payload: StaffScheduleCreate, db: AsyncSession = Depends(get_db)):
+async def assign_staff_shift(
+    payload: StaffScheduleCreate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    hosp_name = None
+    if role in ["hospital", "hospital_coordinator"]:
+        h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+        h_res = await db.execute(h_query)
+        hospital = h_res.scalars().first()
+        if hospital:
+            hosp_name = hospital.name
+
     schedule = StaffScheduleModel(
         id="sch_" + str(uuid.uuid4())[:8],
+        hospital_name=hosp_name,
         name=payload.name,
         role=payload.role,
         department=payload.department,
@@ -275,9 +523,67 @@ async def assign_staff_shift(payload: StaffScheduleCreate, db: AsyncSession = De
     await db.refresh(schedule)
     return schedule
 
+@router.put("/scheduling/{sch_id}", response_model=StaffScheduleResponse)
+async def edit_staff_shift(
+    sch_id: str,
+    payload: StaffScheduleCreate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role not in ["hospital", "hospital_coordinator"]:
+        raise HTTPException(status_code=403, detail="Unauthorized role.")
+        
+    h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+    h_res = await db.execute(h_query)
+    hospital = h_res.scalars().first()
+    if not hospital:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+        
+    query = select(StaffScheduleModel).where(
+        (StaffScheduleModel.id == sch_id) &
+        (StaffScheduleModel.hospital_name == hospital.name)
+    )
+    result = await db.execute(query)
+    schedule = result.scalars().first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Shift not found")
+        
+    schedule.name = payload.name
+    schedule.role = payload.role
+    schedule.department = payload.department
+    schedule.date = payload.date
+    schedule.shift_type = payload.shift_type
+    schedule.shift_time = payload.shift_time
+    schedule.room = payload.room
+    schedule.status = payload.status
+    
+    await db.commit()
+    await db.refresh(schedule)
+    return schedule
+
 @router.delete("/scheduling/{sch_id}")
-async def delete_staff_shift(sch_id: str, db: AsyncSession = Depends(get_db)):
-    query = select(StaffScheduleModel).where(StaffScheduleModel.id == sch_id)
+async def delete_staff_shift(
+    sch_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role not in ["hospital", "hospital_coordinator"]:
+        raise HTTPException(status_code=403, detail="Unauthorized role.")
+        
+    h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+    h_res = await db.execute(h_query)
+    hospital = h_res.scalars().first()
+    if not hospital:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+        
+    query = select(StaffScheduleModel).where(
+        (StaffScheduleModel.id == sch_id) &
+        (StaffScheduleModel.hospital_name == hospital.name)
+    )
     result = await db.execute(query)
     schedule = result.scalars().first()
     if not schedule:
@@ -287,8 +593,24 @@ async def delete_staff_shift(sch_id: str, db: AsyncSession = Depends(get_db)):
     return {"status": "success", "message": "Shift deleted successfully"}
 
 @router.post("/scheduling/duplicate")
-async def duplicate_scheduling(db: AsyncSession = Depends(get_db)):
-    query = select(StaffScheduleModel)
+async def duplicate_scheduling(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role in ["hospital", "hospital_coordinator"]:
+        h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+        h_res = await db.execute(h_query)
+        hospital = h_res.scalars().first()
+        if not hospital:
+            raise HTTPException(status_code=404, detail="Hospital not found")
+        query = select(StaffScheduleModel).where(StaffScheduleModel.hospital_name == hospital.name)
+        hosp_name = hospital.name
+    else:
+        query = select(StaffScheduleModel)
+        hosp_name = None
+
     result = await db.execute(query)
     schedules = result.scalars().all()
     
@@ -299,6 +621,7 @@ async def duplicate_scheduling(db: AsyncSession = Depends(get_db)):
     for sch in schedules:
         new_sch = StaffScheduleModel(
             id="sch_" + str(uuid.uuid4())[:8],
+            hospital_name=hosp_name,
             name=sch.name,
             role=sch.role,
             department=sch.department,
@@ -317,20 +640,36 @@ async def duplicate_scheduling(db: AsyncSession = Depends(get_db)):
 
 # --- LEAVE REQUESTS ---
 @router.get("/leaves", response_model=List[LeaveRequestResponse])
-async def get_leave_requests(db: AsyncSession = Depends(get_db)):
-    query = select(LeaveRequestModel)
+async def get_leave_requests(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    if role in ["hospital", "hospital_coordinator"]:
+        h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+        h_res = await db.execute(h_query)
+        hospital = h_res.scalars().first()
+        if not hospital:
+            return []
+        query = select(LeaveRequestModel).where(LeaveRequestModel.hospital_name == hospital.name)
+    else:
+        query = select(LeaveRequestModel)
     result = await db.execute(query)
     leaves = result.scalars().all()
-    if not leaves:
-        # Seed initial leave requests
+    if not leaves and (role not in ["hospital", "hospital_coordinator"] or hospital.name == "City General Hospital"):
+        # Seed initial leave requests (only for City General Hospital by default)
         seed = [
-            LeaveRequestModel(id="lv_1", staff_id="stf_9", staff_name="Nurse Clara Barton", role="Nurse", department="Pediatrics", start_date="Aug 10", end_date="Aug 14", reason="Family emergency and personal travel.", status="Pending"),
-            LeaveRequestModel(id="lv_2", staff_id="stf_2", staff_name="Dr. Helen Cho", role="Doctor", department="Neurology", start_date="Aug 12", end_date="Aug 13", reason="Medical checkup appointment.", status="Pending")
+            LeaveRequestModel(id="lv_1", hospital_name="City General Hospital", staff_id="stf_9", staff_name="Nurse Clara Barton", role="Nurse", department="Pediatrics", start_date="Aug 10", end_date="Aug 14", reason="Family emergency and personal travel.", status="Pending"),
+            LeaveRequestModel(id="lv_2", hospital_name="City General Hospital", staff_id="stf_2", staff_name="Dr. Helen Cho", role="Doctor", department="Neurology", start_date="Aug 12", end_date="Aug 13", reason="Medical checkup appointment.", status="Pending")
         ]
         for l in seed:
             db.add(l)
         await db.commit()
-        query = select(LeaveRequestModel)
+        if role in ["hospital", "hospital_coordinator"]:
+            query = select(LeaveRequestModel).where(LeaveRequestModel.hospital_name == hospital.name)
+        else:
+            query = select(LeaveRequestModel)
         result = await db.execute(query)
         leaves = result.scalars().all()
     return leaves

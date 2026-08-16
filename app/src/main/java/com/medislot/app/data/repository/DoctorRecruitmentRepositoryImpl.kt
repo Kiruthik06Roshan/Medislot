@@ -18,50 +18,62 @@ class DoctorRecruitmentRepositoryImpl(
     override val applications: StateFlow<List<DoctorApplication>> = _applications.asStateFlow()
 
     init {
-        // Sync with initial applications from VerificationStateStore
-        _applications.value = VerificationStateStore.doctorApplications.toList()
+        // Sync with initial applications from VerificationStateStore only in Demo mode
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            _applications.value = VerificationStateStore.doctorApplications.toList()
+        } else {
+            _applications.value = emptyList()
+        }
+    }
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                syncWithBackend()
-            } catch (e: Exception) {
-                // Ignore background sync errors
-            }
+    override suspend fun getApplications(): Result<List<DoctorApplication>> {
+        val isDemoMode = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+        if (isDemoMode) {
+            return Result.success(_applications.value)
+        }
+        return try {
+            syncWithBackend()
+            Result.success(_applications.value)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
     private suspend fun syncWithBackend() {
         val appResponse = RetrofitClient.apiService.getRecruitmentApplications()
-        if (appResponse.isNotEmpty()) {
-            val mapped = appResponse.map {
-                DoctorApplication(
-                    id = it.id,
-                    name = it.name,
-                    specialization = it.specialization,
-                    hospitalName = it.selected_hospital,
-                    experienceYears = it.experience_years,
-                    docsAttached = it.docs_attached ?: "",
-                    submittedDate = "2026-08-07",
-                    status = when (it.status) {
-                        "Approved" -> VerificationStatus.APPROVED
-                        "Rejected" -> VerificationStatus.REJECTED
-                        "Waiting Documents" -> VerificationStatus.WAITING_FOR_DOCUMENTS
-                        else -> VerificationStatus.PENDING
-                    },
-                    rejectionReason = it.rejection_reason ?: ""
-                )
-            }
-            _applications.value = mapped
-            VerificationStateStore.doctorApplications.clear()
-            VerificationStateStore.doctorApplications.addAll(mapped)
+        val mapped = appResponse.map {
+            DoctorApplication(
+                id = it.id,
+                name = it.name,
+                specialization = it.specialization,
+                hospitalName = it.selected_hospital,
+                experienceYears = it.experience_years,
+                docsAttached = it.docs_attached ?: "",
+                submittedDate = "2026-08-07",
+                status = when (it.status) {
+                    "Approved" -> VerificationStatus.APPROVED
+                    "Rejected" -> VerificationStatus.REJECTED
+                    "Waiting Documents" -> VerificationStatus.WAITING_FOR_DOCUMENTS
+                    else -> VerificationStatus.PENDING
+                },
+                rejectionReason = it.rejection_reason ?: ""
+            )
         }
+        _applications.value = mapped
     }
 
     override suspend fun approveDoctor(appId: String): Result<Unit> {
-        try {
-            RetrofitClient.apiService.updateApplicationStatus(appId, "Approved")
-        } catch (e: Exception) {
-            // Fail silent fallback
+        val isDemoMode = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+        if (!isDemoMode) {
+            return try {
+                RetrofitClient.apiService.updateApplicationStatus(appId, "Approved")
+                _applications.value = _applications.value.map {
+                    if (it.id == appId) it.copy(status = VerificationStatus.APPROVED) else it
+                }
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
         VerificationStateStore.approveDoctor(appId)
         val app = VerificationStateStore.doctorApplications.find { it.id == appId }
@@ -121,10 +133,17 @@ class DoctorRecruitmentRepositoryImpl(
     }
 
     override suspend fun rejectDoctor(appId: String, reason: String): Result<Unit> {
-        try {
-            RetrofitClient.apiService.updateApplicationStatus(appId, "Rejected", reason)
-        } catch (e: Exception) {
-            // Fail silent fallback
+        val isDemoMode = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+        if (!isDemoMode) {
+            return try {
+                RetrofitClient.apiService.updateApplicationStatus(appId, "Rejected", reason)
+                _applications.value = _applications.value.map {
+                    if (it.id == appId) it.copy(status = VerificationStatus.REJECTED, rejectionReason = reason) else it
+                }
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
         VerificationStateStore.rejectDoctor(appId, reason)
         _applications.value = VerificationStateStore.doctorApplications.toList()
@@ -132,10 +151,17 @@ class DoctorRecruitmentRepositoryImpl(
     }
 
     override suspend fun requestDocuments(appId: String): Result<Unit> {
-        try {
-            RetrofitClient.apiService.updateApplicationStatus(appId, "Waiting Documents")
-        } catch (e: Exception) {
-            // Fail silent fallback
+        val isDemoMode = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+        if (!isDemoMode) {
+            return try {
+                RetrofitClient.apiService.updateApplicationStatus(appId, "Waiting Documents")
+                _applications.value = _applications.value.map {
+                    if (it.id == appId) it.copy(status = VerificationStatus.WAITING_FOR_DOCUMENTS) else it
+                }
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
         VerificationStateStore.requestDocumentsForDoctor(appId)
         _applications.value = VerificationStateStore.doctorApplications.toList()

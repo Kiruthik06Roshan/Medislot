@@ -8,6 +8,7 @@ import com.medislot.app.data.model.*
 import com.medislot.app.data.repository.HospitalRepository
 import com.medislot.app.data.repository.HospitalRepositoryProvider
 import com.medislot.app.network.GeminiService
+import com.medislot.app.network.HospitalResponse
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +21,7 @@ class HospitalViewModel(application: Application) : AndroidViewModel(application
     private val geminiService = GeminiService(application)
     private val geminiRepository: GeminiRepository = GeminiRepositoryImpl(geminiService)
 
+    val hospitalProfile: StateFlow<HospitalResponse?> = repository.hospitalProfile
     val resourceState: StateFlow<HospitalResourceState> = repository.resourceState
     val resourceAnalytics: StateFlow<HospitalResourceAnalytics> = repository.resourceAnalytics
 
@@ -187,6 +189,12 @@ class HospitalViewModel(application: Application) : AndroidViewModel(application
     fun duplicatePreviousWeek() {
         viewModelScope.launch {
             repository.duplicatePreviousWeek()
+        }
+    }
+
+    fun refreshData() {
+        viewModelScope.launch {
+            repository.refreshData()
         }
     }
 

@@ -14,7 +14,9 @@ data class HospitalApplication(
     val licenseNumber: String,
     val submittedDate: String,
     var status: VerificationStatus,
-    var rejectionReason: String = ""
+    var rejectionReason: String = "",
+    val adminName: String = "",
+    val contact: String = ""
 )
 
 data class DoctorApplication(
@@ -43,49 +45,61 @@ object VerificationStateStore {
     val doctorHospitalSelections = mutableStateMapOf<String, String>()
 
     init {
+        reset()
+    }
+
+    fun reset() {
+        hospitalApplications.clear()
+        doctorApplications.clear()
+        userVerificationStatus.clear()
+        userRejectionReasons.clear()
+        doctorHospitalSelections.clear()
+
         // Seed mock hospital applications
         hospitalApplications.addAll(
             listOf(
-                HospitalApplication("h_1", "Apollo Hospital", "H-102938", "LIC-4829", "2026-08-04", VerificationStatus.PENDING),
-                HospitalApplication("h_2", "MGM Healthcare", "H-987654", "LIC-1102", "2026-08-05", VerificationStatus.REJECTED, "Invalid registration document scanned. License expiration date is cut off."),
-                HospitalApplication("h_3", "MIOT", "H-883921", "LIC-9831", "2026-08-06", VerificationStatus.APPROVED)
+                HospitalApplication("h_1", "Demo Hospital", "H-102938", "LIC-4829", "2026-08-04", VerificationStatus.PENDING, adminName = "Demo Coordinator", contact = "demo@hospital.com"),
+                HospitalApplication("h_2", "MGM Healthcare", "H-987654", "LIC-1102", "2026-08-05", VerificationStatus.REJECTED, "Invalid registration document scanned. License expiration date is cut off.", adminName = "mgmadmin", contact = "admin@mgm.com"),
+                HospitalApplication("h_3", "MIOT", "H-883921", "LIC-9831", "2026-08-06", VerificationStatus.APPROVED, adminName = "miot_coord", contact = "contact@miot.com")
             )
         )
 
         // Seed mock doctor applications
         doctorApplications.addAll(
             listOf(
-                DoctorApplication("d_1", "Dr. Jane Smith", "Cardiology", "Apollo Hospital", "8", "MBBS_Degree.pdf", "2026-08-05", VerificationStatus.PENDING),
-                DoctorApplication("d_2", "Dr. Robert Lee", "Pediatrics", "Apollo Hospital", "12", "MBBS_Degree.pdf, Pediatrics_Specialty.pdf", "2026-08-05", VerificationStatus.REJECTED, "Degrees/credentials could not be verified with local state council. Please re-upload your registration certificate."),
+                DoctorApplication("d_1", "Dr. Jane Smith", "Cardiology", "Demo Hospital", "8", "MBBS_Degree.pdf", "2026-08-05", VerificationStatus.PENDING),
+                DoctorApplication("d_2", "Dr. Robert Lee", "Pediatrics", "Demo Hospital", "12", "MBBS_Degree.pdf, Pediatrics_Specialty.pdf", "2026-08-05", VerificationStatus.REJECTED, "Degrees/credentials could not be verified with local state council. Please re-upload your registration certificate."),
                 DoctorApplication("d_3", "Dr. Emily Davis", "Neurology", "Fortis Hospital", "15", "MBBS_Degree.pdf", "2026-08-06", VerificationStatus.APPROVED)
             )
         )
 
         // Initialize statuses for default demo accounts so they are ready out-of-the-box
-        userVerificationStatus["Apollo Hospital"] = VerificationStatus.PENDING
+        userVerificationStatus["Demo Hospital"] = VerificationStatus.PENDING
         userVerificationStatus["Dr. Jane Smith"] = VerificationStatus.PENDING
-        doctorHospitalSelections["Dr. Jane Smith"] = "Apollo Hospital"
+        doctorHospitalSelections["Dr. Jane Smith"] = "Demo Hospital"
 
         userVerificationStatus["MGM Healthcare"] = VerificationStatus.REJECTED
         userRejectionReasons["MGM Healthcare"] = "Invalid registration document scanned. License expiration date is cut off."
 
         userVerificationStatus["Dr. Robert Lee"] = VerificationStatus.REJECTED
         userRejectionReasons["Dr. Robert Lee"] = "Degrees/credentials could not be verified with local state council. Please re-upload your registration certificate."
-        doctorHospitalSelections["Dr. Robert Lee"] = "Apollo Hospital"
+        doctorHospitalSelections["Dr. Robert Lee"] = "Demo Hospital"
 
         userVerificationStatus["MIOT"] = VerificationStatus.APPROVED
         userVerificationStatus["Dr. Emily Davis"] = VerificationStatus.APPROVED
         doctorHospitalSelections["Dr. Emily Davis"] = "Fortis Hospital"
     }
 
-    fun addHospitalApplication(name: String, regNum: String, license: String) {
+    fun addHospitalApplication(name: String, regNum: String, license: String, adminName: String = "", contact: String = "") {
         val app = HospitalApplication(
             id = "h_${System.currentTimeMillis()}",
             name = name,
             regNumber = regNum,
             licenseNumber = license,
             submittedDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date()),
-            status = VerificationStatus.PENDING
+            status = VerificationStatus.PENDING,
+            adminName = adminName,
+            contact = contact
         )
         hospitalApplications.add(app)
         userVerificationStatus[name] = VerificationStatus.PENDING

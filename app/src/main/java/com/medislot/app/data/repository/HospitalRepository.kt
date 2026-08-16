@@ -1,9 +1,11 @@
 package com.medislot.app.data.repository
 
 import com.medislot.app.data.model.*
+import com.medislot.app.network.HospitalResponse
 import kotlinx.coroutines.flow.StateFlow
 
 interface HospitalRepository {
+    val hospitalProfile: StateFlow<HospitalResponse?>
     val resourceState: StateFlow<HospitalResourceState>
     val resourceAnalytics: StateFlow<HospitalResourceAnalytics>
 
@@ -103,4 +105,5 @@ interface HospitalRepository {
     suspend fun approveLeave(leaveId: String): Result<Unit>
     suspend fun rejectLeave(leaveId: String): Result<Unit>
     suspend fun addStaffMember(staff: StaffMember): Result<Unit>
+    suspend fun refreshData(): Result<Unit>
 }

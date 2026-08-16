@@ -22,6 +22,7 @@ if (localPropertiesFile.exists()) {
     }
 }
 val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY") ?: "mock_api_key_placeholder"
+val debugBaseUrl = localProperties.getProperty("DEBUG_BASE_URL") ?: "http://10.0.2.2:8000/"
 
 android {
     namespace = "com.medislot.app"
@@ -41,6 +42,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "BASE_URL", "\"$debugBaseUrl\"")
     }
 
     buildTypes {
