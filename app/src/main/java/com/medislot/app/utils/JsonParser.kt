@@ -376,4 +376,28 @@ object JsonParser {
             NotificationGeneratorResponse(notificationText = json)
         }
     }
+
+    fun parseQueuePrioritization(json: String): QueuePrioritizationResponse {
+        return try {
+            val obj = JSONObject(cleanJsonString(json))
+            val recList = mutableListOf<QueueRecommendationItem>()
+            val recArr = obj.optJSONArray("recommendations")
+            if (recArr != null) {
+                for (i in 0 until recArr.length()) {
+                    val recObj = recArr.optJSONObject(i) ?: continue
+                    recList.add(
+                        QueueRecommendationItem(
+                            queue_id = recObj.optString("queue_id", ""),
+                            queue_position = recObj.optInt("queue_position", 0),
+                            estimated_wait_time = recObj.optInt("estimated_wait_time", 0)
+                        )
+                    )
+                }
+            }
+            QueuePrioritizationResponse(recommendations = recList)
+        } catch (e: Exception) {
+            QueuePrioritizationResponse(recommendations = emptyList())
+        }
+    }
 }
+

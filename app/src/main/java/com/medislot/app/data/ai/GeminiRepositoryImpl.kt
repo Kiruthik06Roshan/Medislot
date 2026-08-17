@@ -488,8 +488,21 @@ class GeminiRepositoryImpl(private val service: GeminiService) : GeminiRepositor
         }
     }
 
+    override suspend fun prioritizeQueue(queueDataJson: String, forceRefresh: Boolean): Result<QueuePrioritizationResponse> {
+        val key = "queue_priority_${queueDataJson.hashCode()}"
+        return getOrFetch(
+            key,
+            forceRefresh,
+            { model -> service.generateContent(model, PromptTemplates.getQueuePrioritizationPrompt(queueDataJson)) },
+            { MockAiProvider.prioritizeQueue(queueDataJson) }
+        ) {
+            JsonParser.parseQueuePrioritization(it)
+        }
+    }
+
     override fun clearCache() {
         aiCache.clear()
         oldCache.clear()
     }
 }
+

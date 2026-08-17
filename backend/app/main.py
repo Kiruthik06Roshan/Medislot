@@ -50,7 +50,9 @@ async def startup_event():
             "ALTER TABLE staff_schedules ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
             "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
             "ALTER TABLE inventory ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
-            "ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;"
+            "ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS hospital_name VARCHAR;",
+            "ALTER TABLE patient_queues ADD COLUMN IF NOT EXISTS status VARCHAR;",
+            "ALTER TABLE patient_queues ADD COLUMN IF NOT EXISTS joined_at TIMESTAMP;"
         ]
         for q in alter_queries:
             try:

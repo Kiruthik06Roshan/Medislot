@@ -86,6 +86,9 @@ interface ApiService {
     @GET("api/hospital/all")
     suspend fun getAllHospitals(): List<HospitalResponse>
 
+    @GET("api/hospital/active")
+    suspend fun getActiveHospitals(): List<HospitalResponse>
+
     @POST("api/hospital/{hosp_id}/status")
     suspend fun updateHospitalStatus(
         @Path("hosp_id") hospId: String,
@@ -164,4 +167,37 @@ interface ApiService {
         @Query("cache_key") cacheKey: String,
         @Query("response_data") responseData: String
     ): Map<String, String>
+
+    // --- PATIENT QUEUE SYSTEM ---
+    @POST("api/patients/queue/join")
+    suspend fun joinQueue(@Body request: QueueJoinRequest): QueueResponse
+
+    @GET("api/patients/queue/active/{patient_id}")
+    suspend fun getActiveQueue(@Path("patient_id") patientId: String): QueueResponse
+
+    @PUT("api/patients/queue/leave/{queue_id}")
+    suspend fun leaveQueue(@Path("queue_id") queueId: String): Map<String, String>
+
+    @GET("api/patients/queue/list/{hospital_id}/{department_id}")
+    suspend fun getDepartmentQueue(
+        @Path("hospital_id") hospitalId: String,
+        @Path("department_id") departmentId: String,
+        @Query("doctor_id") doctorId: String? = null
+    ): List<PatientQueueInfo>
+
+    @POST("api/patients/queue/update-order")
+    suspend fun updateQueueOrder(@Body request: QueueUpdateList): Map<String, String>
+
+    @Multipart
+    @POST("api/hospital/upload-document")
+    suspend fun uploadDocument(
+        @Part file: okhttp3.MultipartBody.Part
+    ): UploadDocumentResponse
+
+    @Streaming
+    @GET("api/hospital/documents/{filename}")
+    suspend fun downloadDocument(
+        @Path("filename") filename: String
+    ): okhttp3.ResponseBody
 }
+

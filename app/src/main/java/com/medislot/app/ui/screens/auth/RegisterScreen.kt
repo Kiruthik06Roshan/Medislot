@@ -75,6 +75,10 @@ import com.medislot.app.ui.components.TimelineStepper
 import com.medislot.app.utils.ValidationUtils
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.content.Context
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 
 // Lists for dropdown selections
 private val SPECIALIZATIONS = listOf(
@@ -92,6 +96,36 @@ private val BLOOD_GROUPS = listOf("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O
 private val HOSPITAL_TYPES = listOf("Government", "Private", "Multi-Speciality", "Clinic")
 
 private val RELATIONSHIPS = listOf("Parent", "Spouse", "Child", "Sibling", "Friend", "Other")
+
+private suspend fun uploadPdfDocument(context: android.content.Context, uri: android.net.Uri): String? {
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val contentResolver = context.contentResolver
+            val inputStream = contentResolver.openInputStream(uri) ?: return@withContext null
+            val bytes = inputStream.readBytes()
+            inputStream.close()
+
+            var displayName = "uploaded_file.pdf"
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1) {
+                        displayName = it.getString(nameIndex)
+                    }
+                }
+            }
+
+            val requestFile = bytes.toRequestBody("application/pdf".toMediaTypeOrNull(), 0, bytes.size)
+            val body = MultipartBody.Part.createFormData("file", displayName, requestFile)
+            val response = com.medislot.app.network.RetrofitClient.apiService.uploadDocument(body)
+            response.filename
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -342,12 +376,7 @@ fun RegisterScreen(
                         docHospitalErr == null
             }
             3 -> {
-                if (docMbbsPdfUri == null) {
-                    docMbbsPdfErr = "MBBS Degree Certificate is mandatory"
-                    isValid = false
-                } else {
-                    docMbbsPdfErr = null
-                }
+                docMbbsPdfErr = null
             }
         }
         return isValid
@@ -397,21 +426,8 @@ fun RegisterScreen(
                         hospPinErr == null && hospOfficialEmailErr == null && hospOfficialPhoneErr == null
             }
             4 -> {
-                var docValid = true
-                if (hospRegPdfUri == null) {
-                    hospRegPdfErr = "Hospital Registration Certificate is mandatory"
-                    docValid = false
-                } else {
-                    hospRegPdfErr = null
-                }
-
-                if (hospLicensePdfUri == null) {
-                    hospLicensePdfErr = "Government License Certificate is mandatory"
-                    docValid = false
-                } else {
-                    hospLicensePdfErr = null
-                }
-                isValid = docValid
+                hospRegPdfErr = null
+                hospLicensePdfErr = null
             }
         }
         return isValid
@@ -485,6 +501,13 @@ fun RegisterScreen(
                                         registration_number = docRegistrationNumber
                                     )
                                 )
+                                val doctorDocs = mutableListOf<String>()
+                                if (docMbbsPdfUri != null) doctorDocs.add("MBBS_Degree.pdf")
+                                if (docMdPdfUri != null) doctorDocs.add("MD_MS_Degree.pdf")
+                                if (docCouncilPdfUri != null) doctorDocs.add("Medical_Council_Registration.pdf")
+                                if (docGovtIdPdfUri != null) doctorDocs.add("Government_ID_Proof.pdf")
+                                val docsAttachedStr = if (doctorDocs.isNotEmpty()) doctorDocs.joinToString(",") else ""
+
                                 com.medislot.app.network.RetrofitClient.apiService.createDoctorApplication(
                                     com.medislot.app.network.DoctorApplicationRequest(
                                         uid = registeredUid,
@@ -493,8 +516,8 @@ fun RegisterScreen(
                                         experience_years = docExperience,
                                         medical_registration_number = docRegistrationNumber,
                                         mbbs_institution = docMbbsInstitution,
-                                        docs_attached = "MBBS_Degree.pdf",
-                                        resume_file = "resume.pdf",
+                                        docs_attached = docsAttachedStr,
+                                        resume_file = if (doctorDocs.isNotEmpty()) "resume.pdf" else "",
                                         selected_hospital = docHospitalName
                                     )
                                 )
@@ -502,16 +525,41 @@ fun RegisterScreen(
                                 // Fallback
                             }
                             if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                                val doctorDocs = mutableListOf<String>()
+                                if (docMbbsPdfUri != null) doctorDocs.add("MBBS_Degree.pdf")
+                                if (docMdPdfUri != null) doctorDocs.add("MD_MS_Degree.pdf")
+                                if (docCouncilPdfUri != null) doctorDocs.add("Medical_Council_Registration.pdf")
+                                if (docGovtIdPdfUri != null) doctorDocs.add("Government_ID_Proof.pdf")
+                                val docsAttachedStr = if (doctorDocs.isNotEmpty()) doctorDocs.joinToString(",") else ""
                                 com.medislot.app.data.model.VerificationStateStore.addDoctorApplication(
                                     name = docName,
                                     spec = docSpecialization,
                                     hospital = docHospitalName,
                                     exp = docExperience,
-                                    filename = "MBBS_Degree.pdf"
+                                    filename = docsAttachedStr
                                 )
                             }
                         } else if (role == "hospital") {
                             try {
+                                val hospDocs = mutableListOf<String>()
+                                hospRegPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    hospDocs.add(uploadedFilename ?: "Hospital_Registration_Certificate.pdf")
+                                }
+                                hospLicensePdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    hospDocs.add(uploadedFilename ?: "Government_License_Certificate.pdf")
+                                }
+                                hospNabhPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    hospDocs.add(uploadedFilename ?: "NABH_Accreditation_Certificate.pdf")
+                                }
+                                hospOtherPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    hospDocs.add(uploadedFilename ?: "Other_Accreditation_Certificates.pdf")
+                                }
+                                val hospDocsStr = if (hospDocs.isNotEmpty()) hospDocs.joinToString(",") else ""
+
                                 com.medislot.app.network.RetrofitClient.apiService.registerHospital(
                                     com.medislot.app.network.HospitalRegisterRequest(
                                         name = hospName,
@@ -523,19 +571,38 @@ fun RegisterScreen(
                                         departments = "General,Emergency,ICU",
                                         contact = hospOfficialPhone,
                                         admin_name = adminName,
-                                        docs_attached = "License_Doc.pdf"
+                                        docs_attached = hospDocsStr
                                     )
                                 )
                             } catch (e: Exception) {
                                 // Fallback
                             }
                             if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+                                val hospDocs = mutableListOf<String>()
+                                hospRegPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    hospDocs.add(uploadedFilename ?: "Hospital_Registration_Certificate.pdf")
+                                }
+                                hospLicensePdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    hospDocs.add(uploadedFilename ?: "Government_License_Certificate.pdf")
+                                }
+                                hospNabhPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    hospDocs.add(uploadedFilename ?: "NABH_Accreditation_Certificate.pdf")
+                                }
+                                hospOtherPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    hospDocs.add(uploadedFilename ?: "Other_Accreditation_Certificates.pdf")
+                                }
+                                val hospDocsStr = if (hospDocs.isNotEmpty()) hospDocs.joinToString(",") else ""
                                 com.medislot.app.data.model.VerificationStateStore.addHospitalApplication(
                                     name = hospName,
                                     regNum = hospRegistrationNumber,
                                     license = hospLicenseNumber,
                                     adminName = adminName,
-                                    contact = hospOfficialPhone
+                                    contact = hospOfficialPhone,
+                                    docsAttached = hospDocsStr
                                 )
                             }
                         }
@@ -984,8 +1051,8 @@ fun DoctorStep3(
             )
 
             DocumentUploadCard(
-                title = "MBBS Degree Certificate*",
-                subtitle = "Required for verification",
+                title = "MBBS Degree Certificate (Optional)",
+                subtitle = "Optional verification document",
                 onFileSelected = onMbbsUriSelected,
                 maxSizeBytes = 10 * 1024 * 1024,
                 errorMessage = mbbsErr
@@ -1111,16 +1178,16 @@ fun HospitalStep4(
             )
 
             DocumentUploadCard(
-                title = "Hospital Registration Certificate*",
-                subtitle = "Official registration registration proof",
+                title = "Hospital Registration Certificate (Optional)",
+                subtitle = "Optional verification document",
                 onFileSelected = onRegUriSelected,
                 maxSizeBytes = 20 * 1024 * 1024,
                 errorMessage = regErr
             )
 
             DocumentUploadCard(
-                title = "Government License Certificate*",
-                subtitle = "Active operational license document",
+                title = "Government License Certificate (Optional)",
+                subtitle = "Optional verification document",
                 onFileSelected = onLicenseUriSelected,
                 maxSizeBytes = 20 * 1024 * 1024,
                 errorMessage = licenseErr

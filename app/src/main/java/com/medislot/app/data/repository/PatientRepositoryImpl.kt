@@ -185,4 +185,115 @@ class PatientRepositoryImpl : PatientRepository {
             Result.failure(e)
         }
     }
+
+    override suspend fun joinQueue(request: QueueJoinRequest): Result<QueueResponse> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            val mockResponse = QueueResponse(
+                id = "q_demo_" + System.currentTimeMillis().hashCode(),
+                patient_id = request.patient_id,
+                hospital_id = request.hospital_id,
+                department_id = request.department_id,
+                doctor_id = request.doctor_id,
+                queue_status = "Active",
+                queue_position = 1,
+                estimated_wait_time = 10,
+                created_at = java.time.LocalDateTime.now().toString(),
+                updated_at = java.time.LocalDateTime.now().toString()
+            )
+            return Result.success(mockResponse)
+        }
+        return try {
+            val response = RetrofitClient.apiService.joinQueue(request)
+            Result.success(response)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getActiveQueue(patientId: String): Result<QueueResponse> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            return Result.failure(Exception("No mock active queue entry found"))
+        }
+        return try {
+            val response = RetrofitClient.apiService.getActiveQueue(patientId)
+            Result.success(response)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun leaveQueue(queueId: String): Result<Unit> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            return Result.success(Unit)
+        }
+        return try {
+            RetrofitClient.apiService.leaveQueue(queueId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getDepartmentQueue(
+        hospitalId: String,
+        departmentId: String,
+        doctorId: String?
+    ): Result<List<PatientQueueInfo>> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            val mockList = listOf(
+                PatientQueueInfo(
+                    id = "q_demo_1",
+                    patient_id = "pat_demo_1",
+                    patient_name = "Alice Smith",
+                    age = 28,
+                    gender = "Female",
+                    vitals_heart_rate = 72,
+                    vitals_bp = "120/80",
+                    vitals_spo2 = 99,
+                    vitals_temperature = 36.6f,
+                    symptoms = "Mild headache",
+                    queue_status = "Active",
+                    queue_position = 1,
+                    estimated_wait_time = 10,
+                    created_at = java.time.LocalDateTime.now().minusMinutes(30).toString()
+                ),
+                PatientQueueInfo(
+                    id = "q_demo_2",
+                    patient_id = "pat_demo_2",
+                    patient_name = "Bob Jones",
+                    age = 54,
+                    gender = "Male",
+                    vitals_heart_rate = 104,
+                    vitals_bp = "145/95",
+                    vitals_spo2 = 91,
+                    vitals_temperature = 38.5f,
+                    symptoms = "Severe chest pain and difficulty breathing",
+                    queue_status = "Active",
+                    queue_position = 2,
+                    estimated_wait_time = 20,
+                    created_at = java.time.LocalDateTime.now().minusMinutes(20).toString()
+                )
+            )
+            return Result.success(mockList)
+        }
+        return try {
+            val response = RetrofitClient.apiService.getDepartmentQueue(hospitalId, departmentId, doctorId)
+            Result.success(response)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateQueueOrder(request: QueueUpdateList): Result<Unit> {
+        if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            return Result.success(Unit)
+        }
+        return try {
+            RetrofitClient.apiService.updateQueueOrder(request)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+

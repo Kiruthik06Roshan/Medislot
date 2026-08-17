@@ -33,6 +33,7 @@ class SuperAdminDataIsolationTest {
         override suspend fun registerHospital(request: HospitalRegisterRequest): HospitalResponse = TODO()
         
         override suspend fun getAllHospitals(): List<HospitalResponse> = emptyList()
+        override suspend fun getActiveHospitals(): List<HospitalResponse> = emptyList()
         override suspend fun updateHospitalStatus(hospId: String, status: String, rejectionReason: String?): HospitalResponse = TODO()
         
         override suspend fun getHospitalInventory(): List<InventoryItemResponse> = TODO()
@@ -46,13 +47,23 @@ class SuperAdminDataIsolationTest {
         
         override suspend fun getStaffScheduling(): List<StaffScheduleResponse> = TODO()
         override suspend fun assignStaffShift(request: StaffScheduleRequest): StaffScheduleResponse = TODO()
+        override suspend fun editStaffShift(schId: String, request: StaffScheduleRequest): StaffScheduleResponse = TODO()
         override suspend fun deleteStaffShift(schId: String): Map<String, String> = TODO()
         override suspend fun duplicateScheduling(): Map<String, String> = TODO()
+        override suspend fun getStaffMembers(): List<StaffMemberResponse> = TODO()
         override suspend fun getLeaveRequests(): List<LeaveRequestResponse> = TODO()
         override suspend fun updateLeaveStatus(lvId: String, status: String): LeaveRequestResponse = TODO()
         override suspend fun logAiRequest(request: AiLogRequest): Map<String, String> = TODO()
         override suspend fun getAiCache(cacheKey: String): Map<String, String> = TODO()
         override suspend fun saveAiCache(cacheKey: String, responseData: String): Map<String, String> = TODO()
+        
+        override suspend fun joinQueue(request: QueueJoinRequest): QueueResponse = TODO()
+        override suspend fun getActiveQueue(patientId: String): QueueResponse = TODO()
+        override suspend fun leaveQueue(queueId: String): Map<String, String> = TODO()
+        override suspend fun getDepartmentQueue(hospitalId: String, departmentId: String, doctorId: String?): List<PatientQueueInfo> = TODO()
+        override suspend fun updateQueueOrder(request: QueueUpdateList): Map<String, String> = TODO()
+        override suspend fun uploadDocument(file: okhttp3.MultipartBody.Part): UploadDocumentResponse = TODO()
+        override suspend fun downloadDocument(filename: String): okhttp3.ResponseBody = TODO()
     }
 
     @Before

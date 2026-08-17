@@ -164,3 +164,14 @@ data class ChatResponse(
     val reply: String = "",
     val suggestedQuestions: List<String> = emptyList()
 )
+
+data class QueuePrioritizationResponse(
+    val recommendations: List<QueueRecommendationItem> = emptyList()
+)
+
+data class QueueRecommendationItem(
+    val queue_id: String = "",
+    val queue_position: Int = 0,
+    val estimated_wait_time: Int = 0
+)
+

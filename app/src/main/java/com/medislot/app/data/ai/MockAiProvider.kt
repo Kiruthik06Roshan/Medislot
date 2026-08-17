@@ -262,4 +262,55 @@ object MockAiProvider {
             notificationText = "Operational Update: High volume triage expected. Staff please verify backup rosters. Thank you."
         )
     }
+
+    fun prioritizeQueue(queueDataJson: String): QueuePrioritizationResponse {
+        val recommendations = mutableListOf<QueueRecommendationItem>()
+        try {
+            val jsonArray = org.json.JSONArray(queueDataJson)
+            val itemsList = mutableListOf<org.json.JSONObject>()
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+                val symptoms = item.optString("symptoms", "").lowercase()
+                val hr = item.optInt("vitals_heart_rate", 75)
+                val spo2 = item.optInt("vitals_spo2", 98)
+                
+                val priorityScore = when {
+                    symptoms.contains("chest pain") || symptoms.contains("shortness of breath") || spo2 < 93 || hr > 110 -> 3
+                    symptoms.contains("fever") || symptoms.contains("severe pain") || hr > 95 -> 2
+                    else -> 1
+                }
+                item.put("priority_score", priorityScore)
+                itemsList.add(item)
+            }
+            
+            itemsList.sortWith(compareByDescending<org.json.JSONObject> { it.getInt("priority_score") }.thenBy { it.optInt("queue_position", 99) })
+            
+            for (idx in itemsList.indices) {
+                val item = itemsList[idx]
+                recommendations.add(
+                    QueueRecommendationItem(
+                        queue_id = item.getString("id"),
+                        queue_position = idx + 1,
+                        estimated_wait_time = (idx + 1) * 10
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            try {
+                val jsonArray = org.json.JSONArray(queueDataJson)
+                for (i in 0 until jsonArray.length()) {
+                    val item = jsonArray.getJSONObject(i)
+                    recommendations.add(
+                        QueueRecommendationItem(
+                            queue_id = item.getString("id"),
+                            queue_position = i + 1,
+                            estimated_wait_time = (i + 1) * 10
+                        )
+                    )
+                }
+            } catch (ex: Exception) {}
+        }
+        return QueuePrioritizationResponse(recommendations = recommendations)
+    }
 }
+

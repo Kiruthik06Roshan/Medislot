@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Optional
 import uuid
+import os
+import shutil
 
 from ..database.connection import get_db
 from ..database.models import (
@@ -82,6 +85,16 @@ async def get_all_hospitals(
 ):
     if current_user.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Super Admin role required.")
+    query = select(HospitalModel)
+    res = await db.execute(query)
+    return res.scalars().all()
+
+@router.get("/active", response_model=List[HospitalResponse])
+async def get_active_hospitals(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # Allow any authenticated user (patient, doctor, coordinator) to see clinics
     query = select(HospitalModel)
     res = await db.execute(query)
     return res.scalars().all()
@@ -685,3 +698,40 @@ async def update_leave_status(lv_id: str, status: str, db: AsyncSession = Depend
     await db.commit()
     await db.refresh(leave)
     return leave
+
+UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploaded_documents"))
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+@router.post("/upload-document")
+async def upload_document(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    filename = file.filename
+    ext = os.path.splitext(filename)[1].lower()
+    if ext != ".pdf":
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+    
+    unique_filename = f"{uuid.uuid4().hex}_{filename}"
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    return {"filename": unique_filename}
+
+@router.get("/documents/{filename}")
+async def get_uploaded_document(
+    filename: str,
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Unauthorized access. Super Admin only.")
+    
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Document not found.")
+        
+    return FileResponse(file_path, media_type="application/pdf", filename=safe_filename.split("_", 1)[-1])

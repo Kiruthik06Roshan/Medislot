@@ -1842,12 +1842,18 @@ fun QueueWaitingScreen(
 ) {
     val appointment = MockData.appointments.find { it.id == appointmentId } ?: MockData.appointments[0]
     val context = LocalContext.current
+    val patientRepo = remember { com.medislot.app.data.repository.PatientRepositoryImpl() }
 
     // Live wait states
-    var currentQueueNumber by remember { mutableStateOf(14) }
-    var estimatedTimeMinutes by remember { mutableStateOf(42) }
-    var patientsAhead by remember { mutableStateOf(3) }
-    var expectedTime by remember { mutableStateOf("10:48 AM") }
+    var activeQueue by remember { mutableStateOf<com.medislot.app.network.QueueResponse?>(null) }
+    var currentQueueNumber by remember { mutableStateOf(1) }
+    var estimatedTimeMinutes by remember { mutableStateOf(10) }
+    var patientsAhead by remember { mutableStateOf(0) }
+    var hospitalName by remember { mutableStateOf("") }
+    var departmentName by remember { mutableStateOf("") }
+    var doctorName by remember { mutableStateOf("Triage Doctor") }
+    var queueStatus by remember { mutableStateOf("Active") }
+    var expectedTime by remember { mutableStateOf("Within ~10 mins") }
     var triggerAlertClose by remember { mutableStateOf(true) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -1862,13 +1868,46 @@ fun QueueWaitingScreen(
     )
 
     LaunchedEffect(Unit) {
-        while (currentQueueNumber > 3) {
-            delay(5000)
-            currentQueueNumber -= 1
-            patientsAhead = (currentQueueNumber - 11).coerceAtLeast(0)
-            estimatedTimeMinutes = currentQueueNumber * 3
-            if (patientsAhead == 1) {
-                expectedTime = "10:36 AM"
+        if (!com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
+            val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+            val patientUid = authRepo.getUid() ?: ""
+            while (true) {
+                val result = patientRepo.getActiveQueue(patientUid)
+                result.fold(
+                    onSuccess = {
+                        activeQueue = it
+                        currentQueueNumber = it.queue_position
+                        patientsAhead = (it.queue_position - 1).coerceAtLeast(0)
+                        estimatedTimeMinutes = it.estimated_wait_time
+                        expectedTime = "Within ~${it.estimated_wait_time} mins"
+                        hospitalName = it.hospital_id
+                        departmentName = it.department_id
+                        queueStatus = it.queue_status
+                        doctorName = if (!it.doctor_id.isNullOrBlank()) "Dr. Specialist" else "Triage Doctor"
+                    },
+                    onFailure = {
+                        // queue completed or cancelled
+                    }
+                )
+                delay(5000)
+            }
+        } else {
+            hospitalName = "City General Hospital"
+            departmentName = "Cardiology"
+            doctorName = "Dr. John Doe"
+            queueStatus = "Active"
+            currentQueueNumber = 14
+            estimatedTimeMinutes = 42
+            patientsAhead = 3
+            expectedTime = "10:48 AM"
+            while (currentQueueNumber > 3) {
+                delay(5000)
+                currentQueueNumber -= 1
+                patientsAhead = (currentQueueNumber - 11).coerceAtLeast(0)
+                estimatedTimeMinutes = currentQueueNumber * 3
+                if (patientsAhead == 1) {
+                    expectedTime = "10:36 AM"
+                }
             }
         }
     }
@@ -1931,7 +1970,7 @@ fun QueueWaitingScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            val roomNum = when (appointment.doctorName) {
+            val roomNum = when (doctorName) {
                 "Dr. John Doe" -> "Room 4B (Cardiology)"
                 "Dr. Helen Cho" -> "Room 102 (Neurology)"
                 "Dr. Marcus Vance" -> "Room 205 (Orthopedics)"
@@ -1945,10 +1984,12 @@ fun QueueWaitingScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column {
-                            Text(text = "Doctor", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(text = appointment.doctorName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(text = "Clinic & Department", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(text = if (hospitalName.isNotEmpty()) "$hospitalName • $departmentName" else "MediSlot Clinic", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(text = "Consultant: $doctorName", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        StatusChip(status = "In Progress")
+                        StatusChip(status = queueStatus)
                     }
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)
@@ -2042,6 +2083,33 @@ fun QueueWaitingScreen(
                 onClick = onNavigateToHospitalMap,
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (activeQueue != null) {
+                var isLeaving by remember { mutableStateOf(false) }
+                val coroutineScope = rememberCoroutineScope()
+                Spacer(modifier = Modifier.height(12.dp))
+                MediSlotSecondaryButton(
+                    text = "Leave Live Queue",
+                    onClick = {
+                        coroutineScope.launch {
+                            isLeaving = true
+                            val res = patientRepo.leaveQueue(activeQueue!!.id)
+                            res.fold(
+                                onSuccess = {
+                                    Toast.makeText(context, "Left the queue successfully", Toast.LENGTH_SHORT).show()
+                                    onNavigateBack()
+                                },
+                                onFailure = {
+                                    Toast.makeText(context, "Failed to leave: ${it.message}", Toast.LENGTH_LONG).show()
+                                }
+                            )
+                            isLeaving = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isLeaving
+                )
+            }
 
             Spacer(modifier = Modifier.height(48.dp))
         }

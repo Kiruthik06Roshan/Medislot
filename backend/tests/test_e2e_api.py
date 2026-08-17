@@ -681,5 +681,270 @@ def test_verification_workflow_and_authorization_boundaries(client):
     assert sa_approve_fake.status_code == 404
 
 
+def test_queue_e2e_workflow(client):
+    suffix = uuid.uuid4().hex[:6]
+    
+    # 1. Register Super Admin
+    sa_email = f"sa_queue_{suffix}@medislot.test"
+    sa_reg = client.post("/api/auth/register", json={
+        "email": sa_email,
+        "password": "SuperAdminPass123!",
+        "full_name": "Queue Super Admin",
+        "role": "super_admin"
+    })
+    assert sa_reg.status_code == 200
+    sa_token = sa_reg.json()["access_token"]
+    sa_headers = {"Authorization": f"Bearer {sa_token}"}
+
+    # 2. Register Hospital Coordinator
+    coord_email = f"coord_queue_{suffix}@medislot.test"
+    coord_reg = client.post("/api/auth/register", json={
+        "email": coord_email,
+        "password": "CoordinatorPass123!",
+        "full_name": "Queue Coordinator",
+        "role": "hospital"
+    })
+    assert coord_reg.status_code == 200
+    coord_token = coord_reg.json()["access_token"]
+    coord_uid = coord_reg.json()["uid"]
+    coord_headers = {"Authorization": f"Bearer {coord_token}"}
+
+    # 3. Register Hospital via Coordinator
+    hosp_name = f"Queue Test Hospital {suffix}"
+    hosp_reg = client.post("/api/hospital/register", headers=coord_headers, json={
+        "name": hosp_name,
+        "uid": coord_uid,
+        "license_number": f"LIC-Q-{suffix}",
+        "registration_number": f"REG-Q-{suffix}",
+        "address": "456 Hospital Blvd",
+        "hospital_type": "General",
+        "departments": "Cardiology, Neurology, Pediatrics",
+        "contact": "+1 (555) 888-7777",
+        "admin_name": "Queue Coordinator"
+    })
+    assert hosp_reg.status_code == 200
+    hosp_id = hosp_reg.json()["id"]
+
+    # 4. Approve Hospital via Super Admin
+    appr_res = client.post(f"/api/hospital/{hosp_id}/status?status=Approved", headers=sa_headers)
+    assert appr_res.status_code == 200
+
+    # 5. Register Patient 1
+    p1_email = f"p1_queue_{suffix}@medislot.test"
+    p1_reg = client.post("/api/auth/register", json={
+        "email": p1_email,
+        "password": "Patient1Pass123!",
+        "full_name": "Patient One",
+        "role": "patient"
+    })
+    assert p1_reg.status_code == 200
+    p1_token = p1_reg.json()["access_token"]
+    p1_uid = p1_reg.json()["uid"]
+    p1_headers = {"Authorization": f"Bearer {p1_token}"}
+
+    # Retrieve and seed Patient 1 profile
+    p1_prof_res = client.get(f"/api/patients/profile/{p1_uid}", headers=p1_headers)
+    assert p1_prof_res.status_code == 200
+    p1_pat_id = p1_prof_res.json()["id"]
+
+    # Update Patient 1 Vitals (for enrichment check)
+    p1_update = client.put("/api/patients/profile", headers=p1_headers, json={
+        "uid": p1_uid,
+        "age": 45,
+        "gender": "Male",
+        "vitals_heart_rate": 88,
+        "vitals_bp": "130/85",
+        "vitals_spo2": 96,
+        "vitals_temperature": 37.2,
+        "vitals_blood_sugar": 110
+    })
+    assert p1_update.status_code == 200
+
+    # 6. Register Patient 2
+    p2_email = f"p2_queue_{suffix}@medislot.test"
+    p2_reg = client.post("/api/auth/register", json={
+        "email": p2_email,
+        "password": "Patient2Pass123!",
+        "full_name": "Patient Two",
+        "role": "patient"
+    })
+    assert p2_reg.status_code == 200
+    p2_token = p2_reg.json()["access_token"]
+    p2_uid = p2_reg.json()["uid"]
+    p2_headers = {"Authorization": f"Bearer {p2_token}"}
+
+    p2_prof_res = client.get(f"/api/patients/profile/{p2_uid}", headers=p2_headers)
+    assert p2_prof_res.status_code == 200
+    p2_pat_id = p2_prof_res.json()["id"]
+
+    p2_update = client.put("/api/patients/profile", headers=p2_headers, json={
+        "uid": p2_uid,
+        "age": 62,
+        "gender": "Female",
+        "vitals_heart_rate": 105,
+        "vitals_bp": "150/95",
+        "vitals_spo2": 91,
+        "vitals_temperature": 38.4,
+        "vitals_blood_sugar": 140
+    })
+    assert p2_update.status_code == 200
+
+    # 7. Join Queue Validation Rules
+    # Rule A: Invalid Hospital -> 404
+    bad_hosp = client.post("/api/patients/queue/join", headers=p1_headers, json={
+        "patient_id": p1_uid,
+        "hospital_id": "nonexistent_hosp",
+        "department_id": "Cardiology",
+        "symptoms": "Chest pain"
+    })
+    assert bad_hosp.status_code == 404
+
+    # Rule B: Invalid Department -> 400
+    bad_dept = client.post("/api/patients/queue/join", headers=p1_headers, json={
+        "patient_id": p1_uid,
+        "hospital_id": hosp_id,
+        "department_id": "Orthopedics",
+        "symptoms": "Leg fracture"
+    })
+    assert bad_dept.status_code == 400
+
+    # Rule C: Cross-patient impersonation -> 403
+    bad_auth = client.post("/api/patients/queue/join", headers=p1_headers, json={
+        "patient_id": p2_pat_id,
+        "hospital_id": hosp_id,
+        "department_id": "Cardiology"
+    })
+    assert bad_auth.status_code == 403
+
+    # Rule D: Role Boundaries -> Non-patient cannot join -> 403
+    coord_join = client.post("/api/patients/queue/join", headers=coord_headers, json={
+        "patient_id": p1_uid,
+        "hospital_id": hosp_id,
+        "department_id": "Cardiology"
+    })
+    assert coord_join.status_code == 403
+
+    # 8. Successful Join Queue
+    p1_join = client.post("/api/patients/queue/join", headers=p1_headers, json={
+        "patient_id": p1_uid,
+        "hospital_id": hosp_id,
+        "department_id": "Cardiology",
+        "symptoms": "Chest tightness"
+    })
+    assert p1_join.status_code == 200
+    res1 = p1_join.json()
+    assert res1["queue_position"] == 1
+    assert res1["queue_status"] == "Active"
+    assert res1["status"] == "Active"
+    assert res1["symptoms"] == "Chest tightness"
+    assert res1["estimated_wait_time"] == 10
+    q1_id = res1["id"]
+
+    # Rule E: Prevent duplicate active queue entries
+    p1_dup = client.post("/api/patients/queue/join", headers=p1_headers, json={
+        "patient_id": p1_pat_id,
+        "hospital_id": hosp_id,
+        "department_id": "Cardiology"
+    })
+    assert p1_dup.status_code == 400
+    assert "already in an active queue" in p1_dup.json()["detail"]
+
+    # Patient 2 joins Cardiology
+    p2_join = client.post("/api/patients/queue/join", headers=p2_headers, json={
+        "patient_id": p2_pat_id,
+        "hospital_id": hosp_name,
+        "department_id": "Cardiology",
+        "symptoms": "Difficulty breathing"
+    })
+    assert p2_join.status_code == 200
+    res2 = p2_join.json()
+    assert res2["queue_position"] == 2
+    assert res2["estimated_wait_time"] == 20
+    q2_id = res2["id"]
+
+    # 9. Get Active Queue Endpoint and Ownership
+    p1_active = client.get(f"/api/patients/queue/active/{p1_uid}", headers=p1_headers)
+    assert p1_active.status_code == 200
+    assert p1_active.json()["id"] == q1_id
+
+    p1_spy = client.get(f"/api/patients/queue/active/{p2_pat_id}", headers=p1_headers)
+    assert p1_spy.status_code == 403
+
+    # 10. Get Department Queue and Isolation
+    list_cardio = client.get(f"/api/patients/queue/list/{hosp_id}/Cardiology", headers=p1_headers)
+    assert list_cardio.status_code == 200
+    cardio_data = list_cardio.json()
+    assert len(cardio_data) == 2
+    assert cardio_data[0]["patient_id"] == p1_pat_id
+    assert cardio_data[0]["vitals_heart_rate"] == 88
+    assert cardio_data[1]["patient_id"] == p2_pat_id
+    assert cardio_data[1]["vitals_spo2"] == 91
+
+    list_neuro = client.get(f"/api/patients/queue/list/{hosp_id}/Neurology", headers=p1_headers)
+    assert list_neuro.status_code == 403
+
+    coord_list = client.get(f"/api/patients/queue/list/{hosp_id}/Cardiology", headers=coord_headers)
+    assert coord_list.status_code == 200
+    assert len(coord_list.json()) == 2
+
+    # 11. Update Queue Order Legitimacy and Enforcements
+    bad_update1 = client.post("/api/patients/queue/update-order", headers=coord_headers, json={
+        "items": [
+            {"queue_id": q1_id, "queue_position": 1, "estimated_wait_time": 10},
+            {"queue_id": "nonexistent_qid", "queue_position": 2, "estimated_wait_time": 20}
+        ]
+    })
+    assert bad_update1.status_code == 404
+
+    bad_update2 = client.post("/api/patients/queue/update-order", headers=coord_headers, json={
+        "items": [
+            {"queue_id": q1_id, "queue_position": 1, "estimated_wait_time": 10}
+        ]
+    })
+    assert bad_update2.status_code == 400
+
+    bad_update3 = client.post("/api/patients/queue/update-order", headers=coord_headers, json={
+        "items": [
+            {"queue_id": q1_id, "queue_position": 1, "estimated_wait_time": 10},
+            {"queue_id": q2_id, "queue_position": 3, "estimated_wait_time": 30}
+        ]
+    })
+    assert bad_update3.status_code == 400
+
+    valid_swap = client.post("/api/patients/queue/update-order", headers=coord_headers, json={
+        "items": [
+            {"queue_id": q2_id, "queue_position": 1, "estimated_wait_time": 10},
+            {"queue_id": q1_id, "queue_position": 2, "estimated_wait_time": 20}
+        ]
+    })
+    assert valid_swap.status_code == 200
+
+    # Verify positions swapped
+    p2_active_swap = client.get(f"/api/patients/queue/active/{p2_uid}", headers=p2_headers)
+    assert p2_active_swap.json()["queue_position"] == 1
+    assert p2_active_swap.json()["estimated_wait_time"] == 10
+
+    p1_active_swap = client.get(f"/api/patients/queue/active/{p1_uid}", headers=p1_headers)
+    assert p1_active_swap.json()["queue_position"] == 2
+    assert p1_active_swap.json()["estimated_wait_time"] == 20
+
+    # 12. Leave Queue & Re-indexing validation
+    p1_leave_p2 = client.put(f"/api/patients/queue/leave/{q2_id}", headers=p1_headers)
+    assert p1_leave_p2.status_code == 403
+
+    p2_leave = client.put(f"/api/patients/queue/leave/{q2_id}", headers=p2_headers)
+    assert p2_leave.status_code == 200
+
+    p2_check = client.get(f"/api/patients/queue/active/{p2_uid}", headers=p2_headers)
+    assert p2_check.status_code == 404
+
+    p1_check = client.get(f"/api/patients/queue/active/{p1_uid}", headers=p1_headers)
+    assert p1_check.status_code == 200
+    assert p1_check.json()["queue_position"] == 1
+    assert p1_check.json()["estimated_wait_time"] == 10
+
+
+
+
 
 

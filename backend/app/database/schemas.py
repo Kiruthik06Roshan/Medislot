@@ -297,3 +297,54 @@ class HospitalResponse(BaseModel):
     class Config:
         orm_mode = True
 
+import datetime
+
+class QueueJoinRequest(BaseModel):
+    patient_id: str
+    hospital_id: str
+    department_id: str
+    doctor_id: Optional[str] = None
+    symptoms: Optional[str] = None
+
+class QueueResponse(BaseModel):
+    id: str
+    patient_id: str
+    hospital_id: str
+    department_id: str
+    doctor_id: Optional[str] = None
+    queue_status: str
+    status: Optional[str] = None
+    queue_position: int
+    estimated_wait_time: int
+    symptoms: Optional[str] = None
+    created_at: datetime.datetime
+    joined_at: Optional[datetime.datetime] = None
+    updated_at: datetime.datetime
+    class Config:
+        orm_mode = True
+
+class PatientQueueInfo(BaseModel):
+    id: str
+    patient_id: str
+    patient_name: str
+    age: int
+    gender: str
+    vitals_heart_rate: Optional[int] = None
+    vitals_bp: Optional[str] = None
+    vitals_spo2: Optional[int] = None
+    vitals_temperature: Optional[float] = None
+    symptoms: Optional[str] = None
+    queue_status: str
+    queue_position: int
+    estimated_wait_time: int
+    created_at: datetime.datetime
+
+class QueueUpdateItem(BaseModel):
+    queue_id: str
+    queue_position: int
+    estimated_wait_time: int
+
+class QueueUpdateList(BaseModel):
+    items: List[QueueUpdateItem]
+
+

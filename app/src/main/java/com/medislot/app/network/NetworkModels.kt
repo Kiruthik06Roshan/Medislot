@@ -321,3 +321,57 @@ data class StaffMemberResponse(
     val room: String,
     val status: String
 )
+
+data class QueueJoinRequest(
+    val patient_id: String,
+    val hospital_id: String,
+    val department_id: String,
+    val doctor_id: String? = null,
+    val symptoms: String? = null
+)
+
+data class QueueResponse(
+    val id: String,
+    val patient_id: String,
+    val hospital_id: String,
+    val department_id: String,
+    val doctor_id: String? = null,
+    val queue_status: String,
+    val queue_position: Int,
+    val estimated_wait_time: Int,
+    val symptoms: String? = null,
+    val created_at: String,
+    val updated_at: String
+)
+
+data class PatientQueueInfo(
+    val id: String,
+    val patient_id: String,
+    val patient_name: String,
+    val age: Int,
+    val gender: String,
+    val vitals_heart_rate: Int? = null,
+    val vitals_bp: String? = null,
+    val vitals_spo2: Int? = null,
+    val vitals_temperature: Float? = null,
+    val symptoms: String? = null,
+    val queue_status: String,
+    val queue_position: Int,
+    val estimated_wait_time: Int,
+    val created_at: String
+)
+
+data class QueueUpdateItem(
+    val queue_id: String,
+    val queue_position: Int,
+    val estimated_wait_time: Int
+)
+
+data class QueueUpdateList(
+    val items: List<QueueUpdateItem>
+)
+
+data class UploadDocumentResponse(
+    val filename: String
+)
+

@@ -31,6 +31,9 @@ interface GeminiRepository {
     suspend fun getDailyBriefing(metrics: String, activeCriticalAlerts: String, forceRefresh: Boolean = false): Result<DailyBriefingResponse>
     suspend fun generateNotification(operationalAlertText: String, forceRefresh: Boolean = false): Result<NotificationGeneratorResponse>
     
+    // Patient Queue dynamic re-ordering
+    suspend fun prioritizeQueue(queueDataJson: String, forceRefresh: Boolean = false): Result<QueuePrioritizationResponse>
+
     // Cache clearing
     fun clearCache()
 }

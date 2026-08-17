@@ -77,6 +77,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -101,6 +102,7 @@ import com.medislot.app.ui.components.SectionHeader
 import com.medislot.app.ui.components.StatusChip
 import com.medislot.app.ui.theme.LocalDimens
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import com.medislot.app.viewmodel.AiState
 import com.medislot.app.ui.ai.components.*
@@ -233,6 +235,12 @@ fun PatientDashboardScreen(
 ) {
     val unreadNotifsCount = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) MockData.notifications.count { !it.isRead } else 0
 
+    // Loading & Refreshing States
+    var isScreenLoading by remember { mutableStateOf(true) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var pullDistance by remember { mutableStateOf(0f) }
+    val scrollState = rememberScrollState()
+
     var userEmail by remember { mutableStateOf("") }
     var topDoctors by remember { mutableStateOf<List<com.medislot.app.data.model.DoctorProfileData>>(emptyList()) }
     var patientAppointments by remember { mutableStateOf<List<com.medislot.app.network.AppointmentResponse>>(emptyList()) }
@@ -241,10 +249,28 @@ fun PatientDashboardScreen(
     var dashboardErrorMessage by remember { mutableStateOf<String?>(null) }
     var isDashboardLoading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(Unit) {
+    var activeQueueEntry by remember { mutableStateOf<com.medislot.app.network.QueueResponse?>(null) }
+    var isQueueActionLoading by remember { mutableStateOf(false) }
+    var hospitalList by remember { mutableStateOf<List<com.medislot.app.network.HospitalResponse>>(emptyList()) }
+    var selectedHospName by remember { mutableStateOf("") }
+    var selectedDeptName by remember { mutableStateOf("Cardiology") }
+    var symptomsText by remember { mutableStateOf("") }
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val patientRepo = remember { com.medislot.app.data.repository.PatientRepositoryImpl() }
+
+    LaunchedEffect(Unit, isRefreshing) {
         if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
             topDoctors = MockData.doctors.take(2)
             isDashboardLoading = false
+            // Load mock queue in demo mode
+            activeQueueEntry = null 
+            hospitalList = listOf(
+                com.medislot.app.network.HospitalResponse("h1", "City General Hospital", null, "L1", "R1", "Add1", "Type1", "Depts1", "C1", "Admin1", "Approved", null, null),
+                com.medislot.app.network.HospitalResponse("h2", "Metro Health Medical Center", null, "L2", "R2", "Add2", "Type2", "Depts2", "C2", "Admin2", "Approved", null, null)
+            )
+            selectedHospName = "City General Hospital"
         } else {
             isDashboardLoading = true
             dashboardErrorMessage = null
@@ -274,6 +300,30 @@ fun PatientDashboardScreen(
                     if (recsRes.isSuccess) {
                         patientMedicalRecords = recsRes.getOrNull() ?: emptyList()
                     }
+
+                    // Fetch active queue status
+                    val queueRes = patientRepo.getActiveQueue(patientUid)
+                    if (queueRes.isSuccess) {
+                        activeQueueEntry = queueRes.getOrNull()
+                    } else {
+                        activeQueueEntry = null
+                    }
+
+                    // Fetch all hospitals
+                    try {
+                        val hospRes = com.medislot.app.network.RetrofitClient.apiService.getActiveHospitals()
+                        hospitalList = hospRes
+                        if (hospRes.isNotEmpty() && selectedHospName.isEmpty()) {
+                            val firstHosp = hospRes.first()
+                            selectedHospName = firstHosp.name
+                            val deptsList = firstHosp.departments.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            if (deptsList.isNotEmpty()) {
+                                selectedDeptName = deptsList.first()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // fallback or ignore if endpoint fails
+                    }
                 }
             } catch (e: Exception) {
                 dashboardErrorMessage = NetworkErrorUtils.getReadableErrorMessage(e)
@@ -282,6 +332,7 @@ fun PatientDashboardScreen(
             }
         }
     }
+
 
     val activeAppointment: com.medislot.app.data.model.AppointmentData? = if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
         MockData.appointments.firstOrNull()
@@ -294,12 +345,6 @@ fun PatientDashboardScreen(
     } else {
         if (userEmail.contains("@")) userEmail.substringBefore("@").replace(".", " ").capitalize(java.util.Locale.getDefault()) else "Patient"
     }
-
-    // Loading & Refreshing States
-    var isScreenLoading by remember { mutableStateOf(true) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    var pullDistance by remember { mutableStateOf(0f) }
-    val scrollState = rememberScrollState()
 
     // Track local taken medicines for prototype responsiveness
     val takenMeds = remember { mutableStateListOf<String>() }
@@ -466,12 +511,347 @@ fun PatientDashboardScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
+                    // --- PATIENT QUEUE DESK ---
+                    SectionHeader(
+                        title = "Live Queue Desk",
+                        subtitle = "Real-time AI triage queue status"
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (isQueueActionLoading) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(150.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    } else if (activeQueueEntry != null) {
+                        MediSlotCard(
+                            modifier = Modifier.fillMaxWidth().clickScale { }
+                        ) {
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = activeQueueEntry!!.hospital_id,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = activeQueueEntry!!.department_id,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    StatusChip(status = activeQueueEntry!!.queue_status)
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "QUEUE POSITION",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "#${activeQueueEntry!!.queue_position}",
+                                            style = MaterialTheme.typography.displayMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "ESTIMATED WAIT",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "~${activeQueueEntry!!.estimated_wait_time} mins",
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+                                }
+
+                                activeQueueEntry!!.symptoms?.let { syms ->
+                                    if (syms.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = "Reported Symptoms: $syms",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    MediSlotSecondaryButton(
+                                        text = "Leave Queue",
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                isQueueActionLoading = true
+                                                val result = patientRepo.leaveQueue(activeQueueEntry!!.id)
+                                                result.fold(
+                                                    onSuccess = {
+                                                        activeQueueEntry = null
+                                                        Toast.makeText(context, "Successfully left the queue", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    onFailure = {
+                                                        Toast.makeText(context, "Error: ${it.message}", Toast.LENGTH_LONG).show()
+                                                    }
+                                                )
+                                                isQueueActionLoading = false
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    MediSlotButton(
+                                        text = "Track Queue",
+                                        onClick = {
+                                            onNavigateToQueue(activeQueueEntry!!.id)
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                MediSlotButton(
+                                    text = "Optimize Queue (AI)",
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            isQueueActionLoading = true
+                                            val listRes = patientRepo.getDepartmentQueue(
+                                                activeQueueEntry!!.hospital_id,
+                                                activeQueueEntry!!.department_id
+                                            )
+                                            listRes.fold(
+                                                onSuccess = { pQueueList ->
+                                                    val jsonArray = org.json.JSONArray()
+                                                    for (p in pQueueList) {
+                                                        val obj = org.json.JSONObject()
+                                                        obj.put("id", p.id)
+                                                        obj.put("queue_position", p.queue_position)
+                                                        obj.put("age", p.age)
+                                                        obj.put("gender", p.gender)
+                                                        obj.put("vitals_heart_rate", p.vitals_heart_rate ?: 75)
+                                                        obj.put("vitals_bp", p.vitals_bp ?: "120/80")
+                                                        obj.put("vitals_spo2", p.vitals_spo2 ?: 98)
+                                                        obj.put("vitals_temperature", p.vitals_temperature ?: 37.0f)
+                                                        obj.put("symptoms", p.symptoms ?: "")
+                                                        jsonArray.put(obj)
+                                                    }
+                                                    
+                                                    val priorityRes = viewModel.prioritizeQueue(jsonArray.toString(), forceRefresh = true)
+                                                    priorityRes.fold(
+                                                        onSuccess = { pr ->
+                                                            val updateItems = pr.recommendations.map {
+                                                                com.medislot.app.network.QueueUpdateItem(it.queue_id, it.queue_position, it.estimated_wait_time)
+                                                            }
+                                                            val updateList = com.medislot.app.network.QueueUpdateList(updateItems)
+                                                            val updateRes = patientRepo.updateQueueOrder(updateList)
+                                                            updateRes.fold(
+                                                                onSuccess = {
+                                                                    val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                                                                    val patientUid = authRepo.getUid() ?: ""
+                                                                    val updatedQueue = patientRepo.getActiveQueue(patientUid)
+                                                                    activeQueueEntry = updatedQueue.getOrNull()
+                                                                    Toast.makeText(context, "AI Queue Optimization Completed!", Toast.LENGTH_SHORT).show()
+                                                                },
+                                                                onFailure = {
+                                                                    Toast.makeText(context, "Failed to update queue order on backend: ${it.message}", Toast.LENGTH_LONG).show()
+                                                                }
+                                                            )
+                                                        },
+                                                        onFailure = {
+                                                            Toast.makeText(context, "AI Triage failure: ${it.message}", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    )
+                                                },
+                                                onFailure = {
+                                                    Toast.makeText(context, "Failed to fetch department queue: ${it.message}", Toast.LENGTH_LONG).show()
+                                                }
+                                            )
+                                            isQueueActionLoading = false
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    } else {
+                        MediSlotCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(
+                                    text = "Join Patient Queue Desk",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+
+                                Text(
+                                    text = "Select Hospital",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                if (hospitalList.isEmpty()) {
+                                    Text(
+                                        text = "No clinics available to join.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                } else {
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(hospitalList) { hosp ->
+                                            val isSel = selectedHospName == hosp.name
+                                            Box(
+                                                modifier = Modifier
+                                                    .border(
+                                                        BorderStroke(1.dp, if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .background(
+                                                        if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent,
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .clickable {
+                                                        selectedHospName = hosp.name
+                                                        val deptsList = hosp.departments.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                                                        if (deptsList.isNotEmpty()) {
+                                                            selectedDeptName = deptsList.first()
+                                                        }
+                                                    }
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                            ) {
+                                                Text(
+                                                    text = hosp.name,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text(
+                                    text = "Select Department",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                val selectedHosp = hospitalList.find { it.name == selectedHospName }
+                                val depts = selectedHosp?.departments?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+                                if (depts.isEmpty()) {
+                                    Text(
+                                        text = "No departments available",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(depts) { dept ->
+                                            val isSel = selectedDeptName == dept
+                                            Box(
+                                                modifier = Modifier
+                                                    .border(
+                                                        BorderStroke(1.dp, if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .background(
+                                                        if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent,
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .clickable { selectedDeptName = dept }
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                            ) {
+                                                Text(
+                                                    text = dept,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                OutlinedTextField(
+                                    value = symptomsText,
+                                    onValueChange = { symptomsText = it },
+                                    label = { Text("What are your current symptoms?") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    maxLines = 3
+                                )
+
+                                MediSlotButton(
+                                    text = "Join Live Queue",
+                                    onClick = {
+                                        if (selectedHospName.isBlank() || selectedDeptName.isBlank()) {
+                                            Toast.makeText(context, "Please select clinic and department", Toast.LENGTH_SHORT).show()
+                                            return@MediSlotButton
+                                        }
+                                        coroutineScope.launch {
+                                            isQueueActionLoading = true
+                                            val authRepo = com.medislot.app.data.repository.AuthenticationRepositoryImpl()
+                                            val patientUid = authRepo.getUid() ?: ""
+                                            val result = patientRepo.joinQueue(
+                                                com.medislot.app.network.QueueJoinRequest(
+                                                    patient_id = patientUid,
+                                                    hospital_id = selectedHospName,
+                                                    department_id = selectedDeptName,
+                                                    symptoms = symptomsText
+                                                )
+                                            )
+                                            result.fold(
+                                                onSuccess = {
+                                                    activeQueueEntry = it
+                                                    symptomsText = ""
+                                                    Toast.makeText(context, "Joined Queue Successfully!", Toast.LENGTH_SHORT).show()
+                                                },
+                                                onFailure = {
+                                                    Toast.makeText(context, "Failed to join: ${it.message}", Toast.LENGTH_LONG).show()
+                                                }
+                                            )
+                                            isQueueActionLoading = false
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
                     // 1. Live Queue Card Section (Scenario 1-4 Logic)
                     SectionHeader(
                         title = "My Consultation Desk",
                         subtitle = "Real-time updates for your medical scheduling"
                     )
                     Spacer(modifier = Modifier.height(12.dp))
+
 
                     when {
                         activeAppointment == null -> {
@@ -1484,7 +1864,6 @@ fun PatientDashboardScreen(
     }
 
     // AI dialog implementations
-    val context = LocalContext.current
     if (isChatOpen) {
         AlertDialog(
             onDismissRequest = { isChatOpen = false },

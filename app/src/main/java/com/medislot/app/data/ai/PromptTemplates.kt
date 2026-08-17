@@ -496,4 +496,33 @@ object PromptTemplates {
             $SYSTEM_JSON_INSTRUCTION
         """.trimIndent()
     }
+
+    fun getQueuePrioritizationPrompt(queueDataJson: String): String {
+        return """
+            Role: Medical Queue Intelligence Director
+            Context: You are managing a department/doctor queue dynamically. Your job is to analyze the medical conditions, symptoms, and vitals of patients waiting in line and re-order the queue to prioritize patients with urgent or critical needs, while ensuring stable patients are not completely starved of service.
+            
+            Queue Data:
+            $queueDataJson
+            
+            Return a raw JSON structure matching exactly this schema:
+            {
+              "recommendations": [
+                {
+                  "queue_id": "string",
+                  "queue_position": integer,
+                  "estimated_wait_time": integer
+                }
+              ]
+            }
+            
+            Instructions:
+            1. Evaluate triage severity based on symptoms, vital signs, age, and blood pressure/SPO2 (e.g. SPO2 < 92% is high severity, chest pain is high severity, routine physical checkup is low severity).
+            2. Re-assign positions starting from 1 up to N (where N is the number of active queue entries). Do not skip numbers, do not repeat numbers, do not omit any patient's queue_id.
+            3. Estimate wait times: urgent cases get top priority, each consultation takes approx 10 minutes.
+            
+            $SYSTEM_JSON_INSTRUCTION
+        """.trimIndent()
+    }
 }
+

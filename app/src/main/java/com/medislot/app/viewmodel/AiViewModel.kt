@@ -541,8 +541,13 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun prioritizeQueue(queueDataJson: String, forceRefresh: Boolean = false): Result<QueuePrioritizationResponse> {
+        return repository.prioritizeQueue(queueDataJson, forceRefresh)
+    }
+
     fun clearCache() {
         repository.clearCache()
         showSnackbar("AI Cache cleared.")
     }
 }
+

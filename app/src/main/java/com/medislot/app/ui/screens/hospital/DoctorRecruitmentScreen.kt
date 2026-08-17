@@ -513,11 +513,24 @@ fun DocumentViewerDialog(
     application: DoctorApplication,
     onDismiss: () -> Unit
 ) {
-    val documents = listOf(
-        Pair("MBBS Certificate (PDF)", application.docsAttached.split(",")[0]),
-        Pair("Medical Council ID Badge", "Council_Reg_${application.medicalRegistrationNumber}.png"),
-        Pair("Resume/Curriculum Vitae", application.resumeFile)
-    )
+    val docsList = application.docsAttached.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    val documents = remember(application) {
+        val list = mutableListOf<Pair<String, String>>()
+        docsList.forEach { doc ->
+            val displayName = when {
+                doc.contains("MBBS", ignoreCase = true) -> "MBBS Degree Certificate"
+                doc.contains("MD", ignoreCase = true) -> "MD/MS Degree Certificate"
+                doc.contains("Council", ignoreCase = true) -> "Medical Council Registration"
+                doc.contains("ID", ignoreCase = true) || doc.contains("Govt", ignoreCase = true) -> "Government ID Proof"
+                else -> "Verification Certificate"
+            }
+            list.add(Pair(displayName, doc))
+        }
+        if (application.resumeFile.isNotBlank() && application.resumeFile != "resume.pdf") {
+            list.add(Pair("Resume/Curriculum Vitae", application.resumeFile))
+        }
+        list
+    }
 
     var activeDocIndex by remember { mutableStateOf(0) }
 
@@ -531,58 +544,65 @@ fun DocumentViewerDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // Horizontal Tabs to pick doc
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(documents.size) { index ->
-                        val isSelected = activeDocIndex == index
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable { activeDocIndex = index }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = documents[index].first.split(" ")[0],
-                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                if (documents.isEmpty()) {
+                    Text(
+                        text = "No verification documents uploaded.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    // Horizontal Tabs to pick doc
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(documents.size) { index ->
+                            val isSelected = activeDocIndex == index
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { activeDocIndex = index }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = documents[index].first.split(" ")[0],
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                // Document Frame View
-                val activeDoc = documents[activeDocIndex]
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(260.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(16.dp),
-                        contentAlignment = Alignment.Center
+                    // Document Frame View
+                    val activeDoc = documents.getOrNull(activeDocIndex) ?: Pair("Document", "")
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = if (activeDoc.first.contains("PDF")) Icons.Default.Description else Icons.Default.Image,
-                                contentDescription = null,
-                                tint = if (activeDoc.first.contains("PDF")) Color(0xFFEF4444) else Color(0xFF3B82F6),
-                                modifier = Modifier.size(56.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(activeDoc.first, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
-                            Text("Filename: ${activeDoc.second}", fontSize = 12.sp, color = Color.Gray)
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Box(
+                        Box(
+                            modifier = Modifier.fillMaxSize().padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = if (activeDoc.first.contains("PDF")) Icons.Default.Description else Icons.Default.Image,
+                                    contentDescription = null,
+                                    tint = if (activeDoc.first.contains("PDF")) Color(0xFFEF4444) else Color(0xFF3B82F6),
+                                    modifier = Modifier.size(56.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(activeDoc.first, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
+                                Text("Filename: ${activeDoc.second}", fontSize = 12.sp, color = Color.Gray)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(Color(0xFFF3F4F6))
@@ -594,7 +614,8 @@ fun DocumentViewerDialog(
                     }
                 }
             }
-        },
+        }
+    },
         confirmButton = {
             Button(onClick = onDismiss) {
                 Text("Done Reviewing")

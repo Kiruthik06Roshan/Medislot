@@ -1,5 +1,6 @@
 package com.medislot.app.ui.screens.auth
 
+import kotlinx.coroutines.launch
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -50,6 +51,8 @@ fun SuperAdminDashboardScreen(
     viewModel: SuperAdminViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isDownloadingPdf by remember { mutableStateOf(false) }
     
     val isDemoMode = DemoConfig.isDemoModeActive
     val realHospitalApps by viewModel.hospitals.collectAsState()
@@ -136,9 +139,42 @@ fun SuperAdminDashboardScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Uploaded attachments for ${showHospitalDocDialog?.name}:", fontWeight = FontWeight.Medium)
-                    DocAttachmentRow("Hospital_Registration_Certificate.pdf")
-                    DocAttachmentRow("State_Medical_License.pdf")
-                    DocAttachmentRow("NABH_Accreditation_Proof.pdf")
+                    val docsStr = showHospitalDocDialog?.docsAttached ?: ""
+                    val docsList = docsStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (docsList.isEmpty()) {
+                        Text(
+                            text = "No verification documents uploaded.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        docsList.forEach { doc ->
+                            DocAttachmentRow(
+                                filename = doc,
+                                onViewPdf = { filename ->
+                                    if (!isDownloadingPdf) {
+                                        isDownloadingPdf = true
+                                        coroutineScope.launch {
+                                            try {
+                                                val responseBody = com.medislot.app.network.RetrofitClient.apiService.downloadDocument(filename)
+                                                val bytes = responseBody.bytes()
+                                                val cleanName = filename.substringAfter("_").replace("[^a-zA-Z0-9.]".toRegex(), "_")
+                                                val cacheFile = java.io.File(context.cacheDir, cleanName)
+                                                val fos = java.io.FileOutputStream(cacheFile)
+                                                fos.write(bytes)
+                                                fos.close()
+                                                com.medislot.app.ui.screens.patient.openDownloadedPdf(context, cacheFile)
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "Error downloading PDF: ${e.message}", Toast.LENGTH_SHORT).show()
+                                            } finally {
+                                                isDownloadingPdf = false
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -424,18 +460,58 @@ private fun HospitalRequestCard(
 }
 
 @Composable
-private fun DocAttachmentRow(filename: String) {
+private fun DocAttachmentRow(
+    filename: String,
+    onViewPdf: (String) -> Unit
+) {
+    val hasUuidPrefix = filename.contains("_") && filename.substringBefore("_").length >= 32
+    val cleanName = if (hasUuidPrefix) filename.substringAfter("_") else filename
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-            .padding(12.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Default.Description, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Icon(
+            imageVector = Icons.Default.Description,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(24.dp)
+        )
         Spacer(modifier = Modifier.width(12.dp))
-        Text(filename, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(modifier = Modifier.weight(1f))
-        Text("Verified", style = MaterialTheme.typography.labelSmall, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+        
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = cleanName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (!hasUuidPrefix) {
+                Text(
+                    text = "Document file unavailable",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+        if (hasUuidPrefix) {
+            TextButton(
+                onClick = { onViewPdf(filename) },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "View PDF",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
     }
 }

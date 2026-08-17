@@ -209,3 +209,20 @@ class AiCacheModel(Base):
     cache_key = Column(String, unique=True, index=True, nullable=False)
     response_data = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+class QueueModel(Base):
+    __tablename__ = "patient_queues"
+    id = Column(String, primary_key=True, index=True)
+    patient_id = Column(String, nullable=False)
+    hospital_id = Column(String, nullable=False)
+    department_id = Column(String, nullable=False)
+    doctor_id = Column(String, nullable=True)
+    queue_status = Column(String, default="Active") # Active, Completed, Cancelled
+    status = Column(String, default="Active") # Active, Completed, Cancelled
+    queue_position = Column(Integer, nullable=False)
+    estimated_wait_time = Column(Integer, default=0) # in minutes
+    symptoms = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    joined_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+

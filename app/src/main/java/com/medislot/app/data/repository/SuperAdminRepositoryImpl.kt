@@ -28,7 +28,8 @@ class SuperAdminRepositoryImpl(
                     },
                     rejectionReason = it.rejection_reason ?: "",
                     adminName = it.admin_name ?: "",
-                    contact = it.contact ?: ""
+                    contact = it.contact ?: "",
+                    docsAttached = it.docs_attached ?: ""
                 )
             }
             Result.success(mapped)

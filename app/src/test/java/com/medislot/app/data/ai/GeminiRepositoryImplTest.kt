@@ -99,20 +99,26 @@ class GeminiRepositoryImplTest {
 
     @Test
     fun testAllModelsFailReturnsMockFallbackException() = runBlocking {
-        val fakeService = FakeGeminiService().apply {
-            responses["gemini-2.5-flash"] = Result.failure(Exception("Quota Exceeded"))
-            responses["gemini-3.5-flash-lite"] = Result.failure(Exception("Overloaded"))
-            responses["gemini-3"] = Result.failure(Exception("Unsupported"))
-        }
-        val repository = GeminiRepositoryImpl(fakeService)
+        val originalDemoState = com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive
+        com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = true
+        try {
+            val fakeService = FakeGeminiService().apply {
+                responses["gemini-2.5-flash"] = Result.failure(Exception("Quota Exceeded"))
+                responses["gemini-3.5-flash-lite"] = Result.failure(Exception("Overloaded"))
+                responses["gemini-3"] = Result.failure(Exception("Unsupported"))
+            }
+            val repository = GeminiRepositoryImpl(fakeService)
 
-        val result = repository.checkSymptoms("fever")
-        assertTrue(result.isFailure)
-        assertTrue(result.exceptionOrNull() is MockFallbackException)
-        val mockFallback = result.exceptionOrNull() as MockFallbackException
-        val symptomCheckResponse = mockFallback.mockData as SymptomCheckResponse
-        assertEquals(listOf("Mild Viral Infection", "Seasonal Allergies", "Acute Rhino-sinusitis"), symptomCheckResponse.possibleConditions)
-        assertEquals(listOf("gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3"), fakeService.attempts)
+            val result = repository.checkSymptoms("fever")
+            assertTrue(result.isFailure)
+            assertTrue(result.exceptionOrNull() is MockFallbackException)
+            val mockFallback = result.exceptionOrNull() as MockFallbackException
+            val symptomCheckResponse = mockFallback.mockData as SymptomCheckResponse
+            assertEquals(listOf("Mild Viral Infection", "Seasonal Allergies", "Acute Rhino-sinusitis"), symptomCheckResponse.possibleConditions)
+            assertEquals(listOf("gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3"), fakeService.attempts)
+        } finally {
+            com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive = originalDemoState
+        }
     }
 
     @Test
