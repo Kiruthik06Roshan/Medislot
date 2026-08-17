@@ -39,3 +39,4 @@ backend/app/__pycache__/
 backend/app/api/__pycache__/
 backend/app/database/__pycache__/
 backend/app/utils/__pycache__/
+backend/uploaded_documents/

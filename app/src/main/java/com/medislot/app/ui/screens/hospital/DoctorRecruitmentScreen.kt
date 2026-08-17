@@ -1,5 +1,6 @@
 package com.medislot.app.ui.screens.hospital
 
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -513,6 +514,10 @@ fun DocumentViewerDialog(
     application: DoctorApplication,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isDownloadingPdf by remember { mutableStateOf(false) }
+
     val docsList = application.docsAttached.split(",").map { it.trim() }.filter { it.isNotEmpty() }
     val documents = remember(application) {
         val list = mutableListOf<Pair<String, String>>()
@@ -592,25 +597,56 @@ fun DocumentViewerDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                val hasUuidPrefix = activeDoc.second.contains("_") && activeDoc.second.substringBefore("_").length >= 32
+                                val cleanFilename = if (hasUuidPrefix) activeDoc.second.substringAfter("_") else activeDoc.second
+
                                 Icon(
-                                    imageVector = if (activeDoc.first.contains("PDF")) Icons.Default.Description else Icons.Default.Image,
+                                    imageVector = Icons.Default.Description,
                                     contentDescription = null,
-                                    tint = if (activeDoc.first.contains("PDF")) Color(0xFFEF4444) else Color(0xFF3B82F6),
+                                    tint = Color(0xFFEF4444),
                                     modifier = Modifier.size(56.dp)
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text(activeDoc.first, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
-                                Text("Filename: ${activeDoc.second}", fontSize = 12.sp, color = Color.Gray)
+                                Text("Filename: $cleanFilename", fontSize = 12.sp, color = Color.Gray)
                                 Spacer(modifier = Modifier.height(16.dp))
-                                Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFFF3F4F6))
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text("🔒 VERIFIED ENCRYPTED MOCK DOCUMENT", color = Color.DarkGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                
+                                if (hasUuidPrefix) {
+                                    Button(
+                                        onClick = {
+                                            if (!isDownloadingPdf) {
+                                                isDownloadingPdf = true
+                                                coroutineScope.launch {
+                                                    try {
+                                                        val responseBody = com.medislot.app.network.RetrofitClient.apiService.downloadDocument(activeDoc.second)
+                                                        val bytes = responseBody.bytes()
+                                                        val fileCleanName = activeDoc.second.substringAfter("_").replace("[^a-zA-Z0-9.]".toRegex(), "_")
+                                                        val cacheFile = java.io.File(context.cacheDir, fileCleanName)
+                                                        val fos = java.io.FileOutputStream(cacheFile)
+                                                        fos.write(bytes)
+                                                        fos.close()
+                                                        com.medislot.app.ui.screens.patient.openDownloadedPdf(context, cacheFile)
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Error downloading PDF: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                    } finally {
+                                                        isDownloadingPdf = false
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                    ) {
+                                        Text("View PDF", color = Color.White)
+                                    }
+                                } else {
+                                    Text(
+                                        text = "Document file unavailable",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
-                        }
                     }
                 }
             }

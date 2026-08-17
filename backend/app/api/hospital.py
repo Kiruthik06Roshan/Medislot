@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func
 from typing import List, Optional
 import uuid
 import os
@@ -45,7 +46,7 @@ async def register_hospital(
     existing_hosp = u_res.scalars().first()
     
     if existing_hosp:
-        existing_hosp.name = payload.name
+        existing_hosp.name = payload.name.strip()
         existing_hosp.license_number = payload.license_number
         existing_hosp.registration_number = payload.registration_number
         existing_hosp.address = payload.address
@@ -61,7 +62,7 @@ async def register_hospital(
         
     hospital = HospitalModel(
         id="hosp_" + str(uuid.uuid4())[:8],
-        name=payload.name,
+        name=payload.name.strip(),
         uid=payload.uid,
         license_number=payload.license_number,
         registration_number=payload.registration_number,
@@ -320,7 +321,9 @@ async def get_recruitment_applications(
     hospital = h_res.scalars().first()
     if not hospital:
         return []
-    query = select(DoctorApplicationModel).where(DoctorApplicationModel.selected_hospital == hospital.name)
+    query = select(DoctorApplicationModel).where(
+        func.trim(func.lower(DoctorApplicationModel.selected_hospital)) == func.trim(func.lower(hospital.name))
+    )
     result = await db.execute(query)
     apps = result.scalars().all()
     return apps
@@ -344,7 +347,7 @@ async def create_doctor_application(
         mbbs_institution=payload.mbbs_institution,
         docs_attached=payload.docs_attached,
         resume_file=payload.resume_file,
-        selected_hospital=payload.selected_hospital,
+        selected_hospital=payload.selected_hospital.strip(),
         status="Pending"
     )
     db.add(app)
@@ -375,7 +378,7 @@ async def update_application_status(
     h_query = select(HospitalModel).where(HospitalModel.uid == uid)
     h_res = await db.execute(h_query)
     hospital = h_res.scalars().first()
-    if not hospital or hospital.name != app.selected_hospital:
+    if not hospital or hospital.name.strip().lower() != app.selected_hospital.strip().lower():
         raise HTTPException(status_code=403, detail="Unauthorized to manage applications for this hospital.")
         
     app.status = status
@@ -723,10 +726,34 @@ async def upload_document(
 @router.get("/documents/{filename}")
 async def get_uploaded_document(
     filename: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
-    if current_user.get("role") != "super_admin":
-        raise HTTPException(status_code=403, detail="Unauthorized access. Super Admin only.")
+    role = current_user.get("role")
+    uid = current_user.get("sub")
+    
+    is_authorized = False
+    if role == "super_admin":
+        is_authorized = True
+    elif role in ["hospital", "hospital_coordinator"]:
+        h_query = select(HospitalModel).where(HospitalModel.uid == uid)
+        h_res = await db.execute(h_query)
+        hospital = h_res.scalars().first()
+        if hospital:
+            doc_query = select(DoctorApplicationModel).where(
+                DoctorApplicationModel.docs_attached.like(f"%{filename}%")
+            )
+            doc_res = await db.execute(doc_query)
+            doc_apps = doc_res.scalars().all()
+            for app in doc_apps:
+                if app.selected_hospital.strip().lower() == hospital.name.strip().lower():
+                    is_authorized = True
+                    break
+            if not is_authorized and hospital.docs_attached and filename in hospital.docs_attached:
+                is_authorized = True
+                
+    if not is_authorized:
+        raise HTTPException(status_code=403, detail="Unauthorized access to this document.")
     
     safe_filename = os.path.basename(filename)
     file_path = os.path.join(UPLOAD_DIR, safe_filename)

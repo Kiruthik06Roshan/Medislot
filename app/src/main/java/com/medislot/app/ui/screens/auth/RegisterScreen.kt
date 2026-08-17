@@ -502,10 +502,22 @@ fun RegisterScreen(
                                     )
                                 )
                                 val doctorDocs = mutableListOf<String>()
-                                if (docMbbsPdfUri != null) doctorDocs.add("MBBS_Degree.pdf")
-                                if (docMdPdfUri != null) doctorDocs.add("MD_MS_Degree.pdf")
-                                if (docCouncilPdfUri != null) doctorDocs.add("Medical_Council_Registration.pdf")
-                                if (docGovtIdPdfUri != null) doctorDocs.add("Government_ID_Proof.pdf")
+                                docMbbsPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    doctorDocs.add(uploadedFilename ?: "MBBS_Degree.pdf")
+                                }
+                                docMdPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    doctorDocs.add(uploadedFilename ?: "MD_MS_Degree.pdf")
+                                }
+                                docCouncilPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    doctorDocs.add(uploadedFilename ?: "Medical_Council_Registration.pdf")
+                                }
+                                docGovtIdPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    doctorDocs.add(uploadedFilename ?: "Government_ID_Proof.pdf")
+                                }
                                 val docsAttachedStr = if (doctorDocs.isNotEmpty()) doctorDocs.joinToString(",") else ""
 
                                 com.medislot.app.network.RetrofitClient.apiService.createDoctorApplication(
@@ -526,10 +538,22 @@ fun RegisterScreen(
                             }
                             if (com.medislot.app.ui.screens.auth.DemoConfig.isDemoModeActive) {
                                 val doctorDocs = mutableListOf<String>()
-                                if (docMbbsPdfUri != null) doctorDocs.add("MBBS_Degree.pdf")
-                                if (docMdPdfUri != null) doctorDocs.add("MD_MS_Degree.pdf")
-                                if (docCouncilPdfUri != null) doctorDocs.add("Medical_Council_Registration.pdf")
-                                if (docGovtIdPdfUri != null) doctorDocs.add("Government_ID_Proof.pdf")
+                                docMbbsPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    doctorDocs.add(uploadedFilename ?: "MBBS_Degree.pdf")
+                                }
+                                docMdPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    doctorDocs.add(uploadedFilename ?: "MD_MS_Degree.pdf")
+                                }
+                                docCouncilPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    doctorDocs.add(uploadedFilename ?: "Medical_Council_Registration.pdf")
+                                }
+                                docGovtIdPdfUri?.let { uri ->
+                                    val uploadedFilename = uploadPdfDocument(context, uri)
+                                    doctorDocs.add(uploadedFilename ?: "Government_ID_Proof.pdf")
+                                }
                                 val docsAttachedStr = if (doctorDocs.isNotEmpty()) doctorDocs.joinToString(",") else ""
                                 com.medislot.app.data.model.VerificationStateStore.addDoctorApplication(
                                     name = docName,
